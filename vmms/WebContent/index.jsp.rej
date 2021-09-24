@@ -1,0 +1,8 @@
+diff a/WebContent/index.jsp b/WebContent/index.jsp	(rejected hunks)
+@@ -1,4 +1,4 @@
+ <%
+-/* response.sendRedirect("/prod/web/src/main.jsp"); */
+-	response.sendRedirect("/prod/web/src/cs/CsNotice.jsp?1=1");
++ response.sendRedirect("/prod/web/src/main.jsp");
++	//response.sendRedirect("/prod/web/src/cs/CsNotice.jsp?1=1");
+ %>

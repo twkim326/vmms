@@ -1,0 +1,24 @@
+[10:11:45][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:11:46][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:11:46][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:46:46][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:46:47][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:46:47][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:46:55][DEBUG](com.nucco.beans.User) - UPDATE /*+ INDEX(A) */ TB_USER_LOG A SET OUT_DATE = TO_CHAR(SYSDATE, 'YYYYMMDD'), OUT_TIME = TO_CHAR(SYSDATE, 'HH24MISS'), OUT_IP = ? WHERE SEQ = ? AND HASH_DATA = ?
+[10:47:27][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:47:28][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:47:28][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:47:34][DEBUG](com.nucco.beans.User) - UPDATE /*+ INDEX(A) */ TB_USER_LOG A SET OUT_DATE = TO_CHAR(SYSDATE, 'YYYYMMDD'), OUT_TIME = TO_CHAR(SYSDATE, 'HH24MISS'), OUT_IP = ? WHERE SEQ = ? AND HASH_DATA = ?
+[10:51:23][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:51:23][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:51:24][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:51:28][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:51:28][DEBUG](com.nucco.beans.User) - SELECT  COUNT(*) FROM TB_USER A
+[10:51:29][DEBUG](com.nucco.beans.User) - SELECT /*+ ORDERED USE_NL(C) */ AAA.SEQ, AAA.ID, AAA.NAME, AAA.CELLPHONE, AAA.IS_SMS_SOLDOUT, AAA.IS_SMS_STATE, AAA.IS_SMS_CLOSING, AAA.IS_KAKAO_STATUS, TO_CHAR(AAA.CREATE_DATE, 'YYYY-MM-DD') AS CREATE_DATE, AAA.COMPANY, AAA.ORGAN, CASE WHEN AAA.AUTH_SEQ = 0 THEN '╫ц╫╨еш' ELSE C.NAME END AS AUTH FROM ( SELECT ROWNUM AS ROW_NUM, AA.* FROM ( SELECT /*+ ORDERED USE_HASH(B) */ B.NAME AS COMPANY, ( SELECT /*+ INDEX(D) */ REVERSE(LTRIM(SYS_CONNECT_BY_PATH(REVERSE(CASE WHEN IS_ENABLED = 'N' THEN '{' || NAME || '}' ELSE NAME END), '/'), '/')) FROM TB_ORGANIZATION D WHERE PARENT_SEQ = 0 START WITH SEQ = A.ORGANIZATION_SEQ CONNECT BY SEQ = PRIOR PARENT_SEQ ) AS ORGAN, A.ID, A.SEQ, A.NAME, A.CELLPHONE, A.IS_SMS_SOLDOUT, A.IS_SMS_STATE, A.IS_SMS_CLOSING, A.IS_KAKAO_STATUS, A.CREATE_DATE, A.AUTH_SEQ FROM TB_USER A LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ ORDER BY 1, 2, 3 ) AA WHERE ROWNUM <= 30 ) AAA LEFT JOIN TB_AUTH C ON AAA.AUTH_SEQ = C.SEQ WHERE ROW_NUM >= 1
+[10:51:31][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:57:08][DEBUG](com.nucco.beans.User) - UPDATE /*+ INDEX(A) */ TB_USER_LOG A SET OUT_DATE = TO_CHAR(SYSDATE, 'YYYYMMDD'), OUT_TIME = TO_CHAR(SYSDATE, 'HH24MISS'), OUT_IP = ? WHERE SEQ = ? AND HASH_DATA = ?
+[10:57:12][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:57:15][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[10:57:15][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:57:16][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[10:57:19][DEBUG](com.nucco.beans.User) - UPDATE /*+ INDEX(A) */ TB_USER_LOG A SET OUT_DATE = TO_CHAR(SYSDATE, 'YYYYMMDD'), OUT_TIME = TO_CHAR(SYSDATE, 'HH24MISS'), OUT_IP = ? WHERE SEQ = ? AND HASH_DATA = ?

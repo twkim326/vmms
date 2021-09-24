@@ -1,0 +1,186 @@
+<%@ page import="
+			  com.nucco.*
+			, com.nucco.cfg.*
+			, com.nucco.lib.*
+			, com.nucco.beans.User
+		"
+	contentType="text/html; charset=UTF-8"
+	pageEncoding="UTF-8"
+%><%
+/**
+ * /system/SystemUserLogin.jsp
+ *
+ * 시스템 > 계정 > 로그인
+ *
+ * 작성일 - 2011/03/21, 정원광
+ *
+ */
+
+// 헤더
+	request.setCharacterEncoding("ISO-8859-1");
+	response.setHeader("content-type", "text/html; charset=utf-8");
+	response.setHeader("cache-control", "no-cache");
+
+// 설정
+	GlobalConfig cfg = new GlobalConfig(request, response, session);
+
+// 이미 로그인한 사용자인 경우
+	if (cfg.isLogin()) {
+		response.sendRedirect(cfg.get("script.index"));
+		return;
+	}
+
+// 페이지 유형 설정
+	cfg.put("window.mode", "B");
+
+// 이동할 경로
+//	String goUrl = StringEx.setDefaultValue(StringEx.charset(request.getParameter("goUrl")), cfg.get("topDir") + "/");
+	String goUrl = cfg.get("script.index");
+
+// 인스턴스 생성
+	User objUser = new User(cfg);
+
+// 로그인 처리
+	if (request.getMethod().equals("POST")) {
+		String id = StringEx.charset(request.getParameter("id"));
+		String pass = StringEx.charset(request.getParameter("pass"));
+
+		if (StringEx.isEmpty(id)) {
+			out.print(Message.alert("아이디를 입력하세요."));
+			return;
+		} else if (StringEx.isEmpty(pass)) {
+			out.print(Message.alert("비밀번호를 입력하세요."));
+			return;
+		}
+
+		String error = objUser.login(response, id, pass, request.getRemoteAddr());
+
+		if (!StringEx.isEmpty(error)) {
+			out.print(Message.alert(error));
+			return;
+		}
+
+		response.sendRedirect(goUrl);
+		return;
+	}
+%>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ko" lang="ko">
+<head>
+	<title><%=cfg.get("title")%></title>
+	<meta http-equiv="imagetoolbar" content="no" />
+	<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+	<link rel="stylesheet" type="text/css" href="<%=cfg.get("imgDir")%>/css/login.css">
+	<script type="text/javascript" src="<%=cfg.get("topDir")%>/common/js/prototype/prototype-1.6.0.3.js"></script>
+	<script type="text/javascript" src="<%=cfg.get("topDir")%>/common/js/scriptaculous/1.8.3/scriptaculous.js"></script>
+	<script type="text/javascript" src="<%=cfg.get("topDir")%>/common/js/Common.js"></script>
+	<script type="text/javascript" src="<%=cfg.get("svcDir")%>/js/SvrLink.js"></script>
+
+</head>
+<body>
+<div id="wrap">
+	<div id="login">
+		<img src="<%=cfg.get("imgDir")%>/web/login/systemLogo.gif" alt="VMMS | Vending Machine Management System" />
+		<div id="loginBox">
+		<!-- 로그인 입력 폼 -->			
+			<div class="loginForm">
+			<form method="post" action="<%=request.getRequestURI()%>" onsubmit="return setLogin();">
+				<input type="hidden" name="goUrl" value="<%=goUrl%>" />
+				<div style="padding:5px 0px 5px 50px">
+					<input type="radio" name="usertype" id="admin" onClick="showDiv('Admin');"  checked > <label for="admin">관리자</label>
+					<input type="radio" name="usertype" id="operator" onClick="showDiv('Operator'); " > <label for="operator">운영자</label>
+				</div>
+				<table>
+				<tr>
+					<td>
+					<div id="Admin" class="divcontent">
+						<p>
+							계&nbsp;&nbsp;정&nbsp;
+							<input type="text" name="id" id="id" class="ipt mb3" />
+							<br />
+							비&nbsp;&nbsp;번&nbsp;
+							<input type="password" name="pass" id="pass" class="ipt" />
+						</p>
+					
+					</div>
+					<div id="Operator"  class="divcontent" style="display:none">
+						<p>
+							이&nbsp;&nbsp;름&nbsp;
+							<input type="text" name="name" id="name" class="ipt mb3" />
+							<br />
+							사&nbsp;&nbsp;번&nbsp;
+							<input type="password" name="sabun" id="sabun" class="ipt" />
+						</p>
+					</div>
+					</td>
+					<td>
+						<p>
+							<input type="submit" value="" class="btnLogin" />
+						</p>
+					</td>
+				</tr>
+				</table>
+				
+				
+			</form>
+			</div>
+		<!-- # 로그인 입력 폼 -->
+		</div>
+		<div id="copyright">
+			<table>
+			<td>
+				<img src="<%=cfg.get("imgDir")%>/web/footer_logo.gif" alt="UBCN" />
+			</td>
+			<td>
+			<address style="font-size:11px; margin-right:60px;">
+				<b style="font-size:11px;">주소</b> &nbsp;서울특별시 금천구 가산디지털1로 212, 505호 (가산동, 코오롱애스턴)<br />
+				<b style="font-size:11px;">TEL</b> 02-2082-7880 &nbsp;
+				<b style="font-size:11px;">FAX</b> 02-2082-7881
+			</address>
+			</td>
+			</table>
+		</div>
+	</div>
+</div>
+</body>
+</html>
+
+<script type="text/javascript">
+	function showDiv( divName) {
+	    var i, divcontent;
+	    divcontent = document.getElementsByClassName("divcontent");
+	    for (i = 0; i < divcontent.length; i++) {
+	    	divcontent[i].style.display = "none";
+	    }
+	    document.getElementById(divName).style.display = "block";
+	}
+	
+	// Get the element with id="defaultOpen" and click on it
+	document.getElementById("defaultOpen").click();
+	
+	function setLogin() {
+		var o = {id : $('id'), pass : $('pass')};
+
+		if (!o.id.value) {
+			window.alert("아이디를 입력하세요.");
+			o.id.focus();
+			return false;
+		} else if (!o.pass.value) {
+			window.alert("비밀번호를 입력하세요.");
+			o.pass.focus();
+			return false;
+		}
+
+		return true;
+	}
+
+	Event.observe(window, 'load', function (event) {
+		var o = {id : $('id'), pass : $('pass')};
+
+		if (o.id.value != '') {
+			o.pass.focus();
+		} else {
+			o.id.focus();
+		}
+	}.bind(this));
+</script>

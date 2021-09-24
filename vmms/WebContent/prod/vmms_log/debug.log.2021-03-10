@@ -1,0 +1,3 @@
+[18:09:29][DEBUG](com.nucco.beans.User) - { CALL PG_AUTH.LOGIN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) }
+[18:09:30][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }
+[18:09:30][DEBUG](com.nucco.GlobalConfig) - { CALL PG_AUTH.MENU (?, ?, ?, ?) }

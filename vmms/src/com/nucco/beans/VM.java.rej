@@ -1,0 +1,58 @@
+diff a/src/com/nucco/beans/VM.java b/src/com/nucco/beans/VM.java	(rejected hunks)
+@@ -1,40 +1,28 @@
+ package com.nucco.beans;
+ 
+-import java.io.File;
+-import java.sql.CallableStatement;
+-import java.sql.Connection;
+-import java.sql.PreparedStatement;
+-import java.sql.ResultSet;
+-import java.sql.SQLException;
+-
+-/**
+- * VM.java
+- *
+- * 자판기
+- *
+- * 작성일 - 2011/04/02, 정원광
+- *
+- */
+-import java.util.ArrayList;
+-
+-import javax.servlet.http.HttpServletRequest;
+-
+-import org.apache.log4j.Logger;
+-import org.apache.log4j.PropertyConfigurator;
+-
+ import com.nucco.GlobalConfig;
+ import com.nucco.cfg.GeneralConfig;
+-import com.nucco.lib.DateTime;
+-import com.nucco.lib.FileEx;
+-import com.nucco.lib.Pager;
+-import com.nucco.lib.StringEx;
+-import com.nucco.lib.WarningException;
++import com.nucco.lib.*;
+ import com.nucco.lib.db.DBLibrary;
+-
+ import jxl.Cell;
+ import jxl.Sheet;
+ import jxl.Workbook;
+ import oracle.jdbc.OracleTypes;
++import org.apache.log4j.Logger;
++import org.apache.log4j.PropertyConfigurator;
++
++import javax.servlet.http.HttpServletRequest;
++import java.io.File;
++import java.sql.*;
++import java.util.ArrayList;
++
++/**
++ * VM.java
++ * <p>
++ * 자판기
++ * <p>
++ * 작성일 - 2011/04/02, 정원광
++ */
+ 
+ public class VM {
+ /**

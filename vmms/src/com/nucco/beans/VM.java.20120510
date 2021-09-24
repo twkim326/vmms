@@ -1,0 +1,2063 @@
+package com.nucco.beans;
+
+/**
+ * VM.java
+ *
+ * 자판기
+ *
+ * 작성일 - 2011/04/02, 정원광
+ *
+ */
+
+import java.util.*;
+import java.sql.*;
+import java.io.*;
+import oracle.jdbc.driver.*;
+import javax.servlet.http.*;
+import com.nucco.*;
+import com.nucco.cfg.*;
+import com.nucco.lib.*;
+import com.nucco.lib.db.DBLibrary;
+import jxl.Workbook;
+import jxl.Sheet;
+import jxl.Cell;
+import org.apache.log4j.Logger;
+import org.apache.log4j.PropertyConfigurator;
+
+public class VM {
+/**
+ * 사이트 설정
+ *
+ */
+	private GlobalConfig cfg;
+/**
+ * org.apache.log4j.Logger
+ *
+ */
+	private Logger logger = null;
+/**
+ * 소속
+ *
+ */
+	public ArrayList<GeneralConfig> company;
+/**
+ * 조직
+ *
+ */
+	public ArrayList<GeneralConfig> organ;
+/**
+ * 상품
+ *
+ */
+	public ArrayList<GeneralConfig> goods;
+/**
+ * 판매 이상
+ *
+ */
+	public ArrayList<GeneralConfig> error;
+/**
+ * 목록
+ *
+ */
+	public ArrayList<GeneralConfig> list;
+/**
+ * 조회
+ *
+ */
+	public GeneralConfig data;
+/**
+ * 총 레코드수
+ *
+ */
+	public long records;
+/**
+ * 총 페이지수
+ *
+ */
+	public long pages;
+/**
+ *
+ */
+	public VM(GlobalConfig cfg) throws Exception {
+	// set config
+		this.cfg = cfg;
+
+	// set log4j
+		PropertyConfigurator.configure(cfg.get("config.log4j"));
+		this.logger = Logger.getLogger(this.getClass());
+	}
+/**
+ * 자판기 목록
+ *
+ * @param company 소속
+ * @param organ 조직
+ * @param pageNo 페이지
+ * @param sField 검색 필드
+ * @param sQuery 검색어
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String getList(long company, long organ, int pageNo, String sField, String sQuery) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "1 = 1";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ") + ")";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (!StringEx.isEmpty(sField) && !StringEx.isEmpty(sQuery)) { // 키워드
+			WHERE += " AND " + sField + " LIKE '%" + sQuery + "%'";
+		}
+
+	// 총 레코드수
+		this.records = StringEx.str2long(dbLib.getResult(conn, "SELECT COUNT(*) FROM TB_VENDING_MACHINE A LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ LEFT JOIN TB_USER C ON A.USER_SEQ = C.SEQ WHERE " + WHERE));
+
+	// 총 페이지수
+		this.pages = Pager.getSize(this.records, cfg.getInt("limit.list"));
+
+	// 리스트 가상번호
+		long no = this.records - (pageNo - 1) * cfg.getInt("limit.list");
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+
+		try {
+			int s = ((pageNo - 1) * cfg.getInt("limit.list")) + 1;
+			int e = (s - 1) + cfg.getInt("limit.list");
+
+			ps = dbLib.prepareStatement(conn, "SELECT S2.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT ROWNUM AS RNUM, S1.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT /*+ ORDERED USE_NL(B C D) INDEX_DESC(A PK_VM) */ A.SEQ, A.CODE, A.PLACE, A.TERMINAL_ID, A.MODEL, A.IS_SOLD_OUT, A.IS_CONTROL_ERROR, A.IS_PD_ERROR, A.IS_EMPTY_COL, TO_CHAR(A.CREATE_DATE, 'YYYY-MM-DD') AS CREATE_DATE, B.NAME AS COMPANY, C.NAME AS USER_NAME, TO_CHAR(D.CREATE_DATE, 'YYYYMMDDHH24MISS') AS TRAN_DATE, (SELECT LTRIM(SYS_CONNECT_BY_PATH(NAME, '/'), '/') FROM TB_ORGANIZATION WHERE SEQ = A.ORGANIZATION_SEQ START WITH PARENT_SEQ = 0 CONNECT BY PRIOR SEQ = PARENT_SEQ) AS ORGAN, (SELECT COUNT(*) FROM TB_SALES WHERE TERMINAL_ID = A.TERMINAL_ID AND COL_NO > 0) AS EMPTY_COL_SELLING"
+				+ " FROM TB_VENDING_MACHINE A"
+				+ " LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ"
+				+ " LEFT JOIN TB_USER C ON A.USER_SEQ = C.SEQ"
+				+ " LEFT JOIN TB_TXT_STATUS D ON (A.TERMINAL_ID = D.TERMINAL_ID AND A.TRANSACTION_NO = D.TRANSACTION_NO)"
+				+ " WHERE " + WHERE
+				+ " ) S1"
+				+ " WHERE ROWNUM <= " + e
+				+ " ) S2"
+				+ " WHERE RNUM >= " + s);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("CODE", rs.getString("CODE"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("TERMINAL_ID", rs.getString("TERMINAL_ID"));
+				c.put("MODEL", rs.getString("MODEL"));
+				c.put("IS_SOLD_OUT", rs.getString("IS_SOLD_OUT"));
+				c.put("IS_CONTROL_ERROR", rs.getString("IS_CONTROL_ERROR"));
+				c.put("IS_PD_ERROR", rs.getString("IS_PD_ERROR"));
+				c.put("IS_EMPTY_COL", rs.getString("IS_EMPTY_COL"));
+				c.put("CREATE_DATE", rs.getString("CREATE_DATE"));
+				c.put("COMPANY", rs.getString("COMPANY"));
+				c.put("USER_NAME", rs.getString("USER_NAME"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+				c.put("IS_UPDATE", StringEx.isEmpty(rs.getString("TRAN_DATE")) ? "N" : "Y");
+				c.put("IS_EXPIRE", !StringEx.isEmpty(rs.getString("TRAN_DATE")) && DateTime.getDifferTime(rs.getString("TRAN_DATE")) > 3600 * 3 ? "Y" : "N");
+				c.put("EMPTY_COL_SELLING", rs.getLong("EMPTY_COL_SELLING"));
+				c.put("NO", no--);
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 자판기 조회
+ *
+ * @param seq 등록번호
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String detail(long seq) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절
+		String WHERE = "A.SEQ = " + seq;
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ") + ")";
+			}
+		}
+
+	// 자판기 정보
+		this.data = new GeneralConfig();
+
+		try {
+			ps = dbLib.prepareStatement(conn, "SELECT A.*, B.NAME AS COMPANY, C.NAME AS USER_NAME, (SELECT LTRIM(SYS_CONNECT_BY_PATH(NAME, '/'), '/') FROM TB_ORGANIZATION WHERE SEQ = A.ORGANIZATION_SEQ START WITH PARENT_SEQ = 0 CONNECT BY PRIOR SEQ = PARENT_SEQ) AS ORGAN, CASE WHEN D.CONTROL_ERROR IS NOT NULL THEN FN_CONTROL_ERROR(D.CONTROL_ERROR) ELSE '' END AS CONTROL_ERROR, CASE WHEN D.PD_ERROR IS NOT NULL THEN FN_PD_ERROR(D.PD_ERROR) ELSE '' END AS PD_ERROR, CASE WHEN D.EMPTY_COL IS NOT NULL THEN FN_EMPTY_COL(D.EMPTY_COL) ELSE '' END AS EMPTY_COL, TO_CHAR(D.CREATE_DATE, 'YYYYMMDDHH24MISS') AS TRAN_DATE, TO_CHAR(D.CREATE_DATE, 'YYYY-MM-DD HH24:MI:SS') AS TRAN_DATE_2 FROM TB_VENDING_MACHINE A LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ LEFT JOIN TB_USER C ON A.USER_SEQ = C.SEQ LEFT JOIN TB_TXT_STATUS D ON (A.TERMINAL_ID = D.TERMINAL_ID AND A.TRANSACTION_NO = D.TRANSACTION_NO) WHERE " + WHERE);
+			rs = ps.executeQuery();
+
+			if (rs.next()) {
+				this.data.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				this.data.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				this.data.put("USER_SEQ", rs.getLong("USER_SEQ"));
+				this.data.put("CODE", rs.getString("CODE"));
+				this.data.put("TERMINAL_ID", rs.getString("TERMINAL_ID"));
+				this.data.put("MODEL", rs.getString("MODEL"));
+				this.data.put("PLACE", rs.getString("PLACE"));
+				this.data.put("MODEM", rs.getString("MODEM"));
+				this.data.put("TRANSACTION_NO", rs.getString("TRANSACTION_NO"));
+				this.data.put("IS_SOLD_OUT", rs.getString("IS_SOLD_OUT"));
+				this.data.put("IS_CONTROL_ERROR", rs.getString("IS_CONTROL_ERROR"));
+				this.data.put("IS_PD_ERROR", rs.getString("IS_PD_ERROR"));
+				this.data.put("IS_EMPTY_COL", rs.getString("IS_EMPTY_COL"));
+				this.data.put("COMPANY", rs.getString("COMPANY"));
+				this.data.put("USER_NAME", rs.getString("USER_NAME"));
+				this.data.put("ORGAN", rs.getString("ORGAN"));
+				this.data.put("CONTROL_ERROR", rs.getString("CONTROL_ERROR"));
+				this.data.put("PD_ERROR", rs.getString("PD_ERROR"));
+				this.data.put("EMPTY_COL", rs.getString("EMPTY_COL"));
+				this.data.put("TRAN_DATE", rs.getString("TRAN_DATE_2"));
+				this.data.put("IS_UPDATE", StringEx.isEmpty(rs.getString("TRAN_DATE")) ? "N" : "Y");
+				this.data.put("IS_EXPIRE", !StringEx.isEmpty(rs.getString("TRAN_DATE")) && DateTime.getDifferTime(rs.getString("TRAN_DATE")) > 3600 * 3 ? "Y" : "N");
+			} else {
+				error = "등록되지 않았거나 조회할 권한이 없는 자판기입니다.";
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+	// 자판기 상품
+		this.goods = new ArrayList<GeneralConfig>();
+
+		if (StringEx.isEmpty(error)) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM_GOODS) */ A.COL_NO, A.GOODS_SEQ, A.IS_SOLD_OUT, B.NAME FROM TB_VENDING_MACHINE_GOODS A INNER JOIN TB_GOODS B ON A.GOODS_SEQ = B.SEQ WHERE A.VM_SEQ = ?");
+				ps.setLong(1, seq);
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("COL_NO", rs.getInt("COL_NO"));
+					c.put("GOODS_SEQ", rs.getLong("GOODS_SEQ"));
+					c.put("IS_SOLD_OUT", rs.getString("IS_SOLD_OUT"));
+					c.put("NAME", rs.getString("NAME"));
+
+					this.goods.add(c);
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 판매 이상
+		this.error = new ArrayList<GeneralConfig>();
+
+		if (StringEx.isEmpty(error)) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT TRANSACTION_NO, TO_CHAR(TO_DATE(TRANSACTION_DATE || TRANSACTION_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS') AS TRANSACTION_DATE, COL_NO FROM TB_SALES WHERE TERMINAL_ID = ? AND COL_NO > 0");
+				ps.setString(1, this.data.get("TERMINAL_ID"));
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("TRANSACTION_NO", rs.getString("TRANSACTION_NO"));
+					c.put("TRANSACTION_DATE", rs.getString("TRANSACTION_DATE"));
+					c.put("COL_NO", rs.getInt("COL_NO"));
+
+					this.error.add(c);
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 자판기 등록
+ *
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String regist() throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 소속
+		this.company = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = dbLib.prepareStatement(conn, "SELECT /*+ INDEX(A PK_COMPANY) */ SEQ, NAME FROM TB_COMPANY A WHERE (CASE WHEN ? > 0 THEN SEQ ELSE 1 END) = (CASE WHEN ? > 0 THEN ? ELSE 1 END)");
+			ps.setLong(1, this.cfg.getLong("user.company"));
+			ps.setLong(2, this.cfg.getLong("user.company"));
+			ps.setLong(3, this.cfg.getLong("user.company"));
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("NAME", rs.getString("NAME"));
+
+				this.company.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn);
+			return error;
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return null;
+	}
+/**
+ * 자판기 등록
+ *
+ * @param seq 등록번호
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String regist(long seq) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 자판기 정보
+		this.data = new GeneralConfig();
+
+		if (seq > 0) {
+		// 자판기 등록 정보
+			String WHERE = "A.SEQ = " + seq;
+
+			if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+				WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+			} else {
+				if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+					WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+				}
+
+				if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+					WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ") + ")";
+				}
+			}
+
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT A.*,( SELECT ORGANIZATION_SEQ FROM TB_USER WHERE SEQ=A.USER_SEQ ) AS USER_ORG_SEQ ,(SELECT /*+ INDEX_DESC(SA PK_VM_HISTORY) */ START_DATE FROM TB_VENDING_MACHINE_HISTORY SA WHERE SA.VM_SEQ = A.SEQ AND COL_NO = 0 AND ROWNUM = 1) AS LATEST_HISTORY_DATE, (SELECT /*+ INDEX_DESC(SA PK_VM_PLACE) */ START_DATE FROM TB_VENDING_MACHINE_PLACE SA WHERE SA.VM_SEQ = A.SEQ AND ROWNUM = 1) AS LATEST_PLACE_DATE FROM TB_VENDING_MACHINE A WHERE " + WHERE);
+				rs = ps.executeQuery();
+
+				if (rs.next()) {
+					this.data.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+					this.data.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+					this.data.put("USER_SEQ", rs.getLong("USER_SEQ"));
+					this.data.put("CODE", rs.getString("CODE"));
+					this.data.put("TERMINAL_ID", rs.getString("TERMINAL_ID"));
+					this.data.put("MODEL", rs.getString("MODEL"));
+					this.data.put("PLACE", rs.getString("PLACE"));
+					this.data.put("MODEM", rs.getString("MODEM"));
+					this.data.put("LATEST_HISTORY_DATE", rs.getString("LATEST_HISTORY_DATE"));
+					this.data.put("LATEST_PLACE_DATE", rs.getString("LATEST_PLACE_DATE"));
+					
+					this.data.put("USER_ORG_SEQ", rs.getLong("USER_ORG_SEQ"));
+					
+				} else {
+					error = "등록되지 않았거나 수정할 권한이 없는 자판기입니다.";
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 자판기 상품 등록 정보
+		this.goods = new ArrayList<GeneralConfig>();
+
+		if (StringEx.isEmpty(error) && seq > 0) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM_GOODS) */ A.COL_NO, A.GOODS_SEQ, B.NAME FROM TB_VENDING_MACHINE_GOODS A INNER JOIN TB_GOODS B ON A.GOODS_SEQ = B.SEQ WHERE A.VM_SEQ = ?");
+				ps.setLong(1, seq);
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("COL_NO", rs.getInt("COL_NO"));
+					c.put("GOODS_SEQ", rs.getLong("GOODS_SEQ"));
+					c.put("NAME", rs.getString("NAME"));
+
+					this.goods.add(c);
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 자판기 운영자일 경우
+		if (StringEx.isEmpty(error) && this.cfg.get("user.operator").equals("Y")) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT B.NAME AS COMPANY, (SELECT LTRIM(SYS_CONNECT_BY_PATH(NAME, '/'), '/') FROM TB_ORGANIZATION WHERE SEQ = A.ORGANIZATION_SEQ START WITH PARENT_SEQ = 0 CONNECT BY PRIOR SEQ = PARENT_SEQ) AS ORGAN FROM TB_USER A LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ LEFT JOIN TB_AUTH C ON A.AUTH_SEQ = C.SEQ WHERE A.SEQ = ?");
+				ps.setLong(1, cfg.getLong("user.seq"));
+				rs = ps.executeQuery();
+
+				if (rs.next()) {
+					this.data.put("COMPANY", rs.getString("COMPANY"));
+					this.data.put("ORGAN", rs.getString("ORGAN"));
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 판매 이상
+		this.error = new ArrayList<GeneralConfig>();
+
+		if (StringEx.isEmpty(error) && seq > 0) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT COL_NO FROM TB_SALES WHERE TERMINAL_ID = ? AND COL_NO > 0 GROUP BY COL_NO ORDER BY COL_NO");
+				ps.setString(1, this.data.get("TERMINAL_ID"));
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("COL_NO", rs.getInt("COL_NO"));
+
+					this.error.add(c);
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 자판기 등록
+ *
+ * @param request javax.servlet.http.HttpServletRequest
+ * @param seq 등록번호
+ * @param company 소속
+ * @param organ 조직
+ * @param user 담당계정
+ * @param code 코드
+ * @param terminal 단말기 ID
+ * @param model 모델
+ * @param place 설치위치
+ * @param modem 모뎀
+ * @param sgcnt 자판기 상품 갯수
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String modem, int sgcnt) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		CallableStatement cs = null;
+		String error = null;
+		long sequence = 0;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// COMMIT 설정
+		conn.setAutoCommit(false);
+
+	// 자판기 등록
+		try {
+			//cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+			cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE2 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+			cs.setString(1, this.cfg.get("server"));
+			cs.setLong(2, seq);
+			cs.setLong(3, company);
+			cs.setLong(4, organ);
+			cs.setLong(5, user);
+			cs.setString(6, code);
+			cs.setString(7, terminal);
+			cs.setString(8, model);
+			cs.setString(9, place);
+			cs.setString(10, modem);
+			cs.setLong(11, this.cfg.getLong("user.seq"));
+			cs.registerOutParameter(12, OracleTypes.NUMBER);
+			cs.registerOutParameter(13, OracleTypes.VARCHAR);
+			cs.execute();
+
+			sequence = cs.getLong(12);
+			error = cs.getString(13);
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+			return error;
+		}
+
+	// 자판기 상품 삭제
+		for (int i = 1; i <= sgcnt; i++) {
+			int column = StringEx.str2int(request.getParameter("col" + i));
+			String isDel = StringEx.setDefaultValue(request.getParameter("isDel" + i), "N");
+
+			if (column == 0 || isDel.equals("N")) {
+				continue;
+			}
+
+			try {
+				cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS (?, ?, ?, ?, ?, ?)}");
+				cs.setString(1, this.cfg.get("server"));
+				cs.setLong(2, sequence);
+				cs.setInt(3, column);
+				cs.setLong(4, 0);
+				cs.setLong(5, this.cfg.getLong("user.seq"));
+				cs.registerOutParameter(6, OracleTypes.VARCHAR);
+				cs.execute();
+
+				error = cs.getString(6);
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(cs);
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				break;
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+			return error;
+		}
+
+	// 자판기 상품 등록
+		for (int i = 1; i <= sgcnt; i++) {
+			int column = StringEx.str2int(request.getParameter("col" + i));
+			long goods = StringEx.str2long(request.getParameter("seq" + i));
+			String isDel = StringEx.setDefaultValue(request.getParameter("isDel" + i), "N");
+
+			if (column == 0 || goods == 0 || isDel.equals("Y")) {
+				continue;
+			}
+
+			try {
+				cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS (?, ?, ?, ?, ?, ?)}");
+				cs.setString(1, this.cfg.get("server"));
+				cs.setLong(2, sequence);
+				cs.setInt(3, column);
+				cs.setLong(4, goods);
+				cs.setLong(5, this.cfg.getLong("user.seq"));
+				cs.registerOutParameter(6, OracleTypes.VARCHAR);
+				cs.execute();
+
+				error = cs.getString(6);
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(cs);
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				break;
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+			return error;
+		}
+
+	// 미등록 상품 중 매출 기록이 없는 상품 삭제
+		try {
+			cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS_CLEAR (?)}");
+			cs.registerOutParameter(1, OracleTypes.VARCHAR);
+			cs.execute();
+
+			error = cs.getString(1);
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+			return error;
+		}
+
+	// 리소스 반환
+		dbLib.close(conn, dbLib.COMMIT);
+
+		return StringEx.long2str(sequence);
+	}
+/**
+ * 자판기 일괄 등록
+ *
+ * @param company 소속
+ * @param excel 엑셀
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	/*
+	public String regist(long company, File excel) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		CallableStatement cs = null;
+		Workbook workbook = null;
+		Sheet sheet = null;
+		String error = null;
+		String vcode = "";
+
+	// 인수 체크
+		if (company == 0) {
+			error = "소속이 존재하지 않습니다.";
+		} else if (excel == null || excel.length() <= 0) {
+			error = "등록하실 엑셀을 업로드하세요.";
+		} else if (!StringEx.inArray(FileEx.extension(excel.getName()), "xls".split(";"))) {
+			error = "XLS 파일만 등록이 가능합니다.";
+		}
+
+		if (!StringEx.isEmpty(error)) {
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return error;
+		}
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// COMMIT 설정
+		conn.setAutoCommit(false);
+
+	// 엑셀 읽기
+		try {
+			workbook = Workbook.getWorkbook(excel);
+
+			if (workbook != null) {
+				sheet = workbook.getSheet(0);
+
+				if (sheet != null) { // 자판기 등록
+					if (this.cfg.getInt("excel.limit.vmRun") > 0 && sheet.getRows() <= this.cfg.getInt("excel.limit.vmRun")) {
+						//cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_BATCH (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+						cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_BATCH2 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+
+						for (int i = 1; i < sheet.getRows(); i++) {
+							Cell user = sheet.getCell(0, i);
+							Cell code = sheet.getCell(1, i);
+							Cell terminal = sheet.getCell(2, i);
+							Cell model = sheet.getCell(3, i);
+							Cell modem = sheet.getCell(4, i);
+							Cell place = sheet.getCell(5, i);
+
+							//if (user == null || code == null || terminal == null || place == null) {
+							if (user == null || code == null || terminal == null ) {
+								//continue;
+								if(user == null) throw new Exception("담당자 계정이 없습니다.");
+								if(code == null) throw new Exception("자판기 코드가 없습니다.");
+								if(terminal == null) throw new Exception("단말기 ID가 없습니다.");
+							} 
+							//else if (StringEx.isEmpty(user.getContents()) || StringEx.isEmpty(code.getContents()) || StringEx.isEmpty(terminal.getContents()) || StringEx.isEmpty(place.getContents())) {
+							else if (StringEx.isEmpty(user.getContents()) || StringEx.isEmpty(code.getContents()) || StringEx.isEmpty(terminal.getContents())) {
+								//continue;								
+								if(StringEx.isEmpty(user.getContents())) throw new Exception("담당자 계정이 없습니다.");
+								if(StringEx.isEmpty(code.getContents())) throw new Exception("자판기 코드가 없습니다.");
+								if(StringEx.isEmpty(terminal.getContents())) throw new Exception("단말기 ID가 없습니다.");
+							}
+
+							try {
+								cs.setString(1, this.cfg.get("server"));
+								cs.setString(2, this.cfg.get("user.operator").equals("Y") ? this.cfg.get("user.id") : user.getContents());
+								cs.setLong(3, company);
+								cs.setString(4, code.getContents());
+								cs.setString(5, terminal.getContents());
+								cs.setString(6, model.getContents());
+								cs.setString(7, place.getContents());
+								cs.setString(8, modem.getContents());
+								cs.setLong(9, this.cfg.getLong("user.seq"));
+								cs.registerOutParameter(10, OracleTypes.VARCHAR);
+								cs.executeUpdate();
+
+								error = cs.getString(10);
+							} catch (Exception e_) {
+								this.logger.error(e_);
+								error = e_.getMessage();
+							}
+
+							if (!StringEx.isEmpty(error)) {
+								break;
+							}
+						}
+					} else {
+						error = "자판기 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit.vmRun")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)";
+					}
+				} else {
+					error = "자판기 쉬트가 존재하지 않습니다.";
+				}
+
+				if (!StringEx.isEmpty(error)) {
+					dbLib.close(conn, dbLib.ROLLBACK);
+
+					if (excel.exists()) {
+						excel.delete();
+					}
+
+					return error;
+				}
+
+				sheet = workbook.getSheet(1);
+
+				if (sheet != null) { // 상품 등록
+					if (this.cfg.getInt("excel.limit.vmRun.goods") > 0 && sheet.getRows() <= this.cfg.getInt("excel.limit.vmRun.goods")) {
+						cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS_BATCH (?, ?, ?, ?, ?, ?, ?)}");
+
+						for (int i = 1; i < sheet.getRows(); i++) {
+							Cell vm = sheet.getCell(0, i);
+							Cell column = sheet.getCell(1, i);
+							Cell goods = sheet.getCell(2, i);
+
+							if (vm != null && !StringEx.isEmpty(vm.getContents())) {
+								vcode = vm.getContents();
+							}
+
+							if (column == null || goods == null) {
+								continue;
+							} else if (StringEx.isEmpty(vcode) || StringEx.isEmpty(column.getContents()) || StringEx.isEmpty(goods.getContents())) {
+								continue;
+							}
+
+							try {
+								cs.setString(1, this.cfg.get("server"));
+								cs.setLong(2, company);
+								cs.setString(3, vcode);
+								cs.setInt(4, StringEx.str2int(column.getContents()));
+								cs.setString(5, goods.getContents());
+								cs.setLong(6, this.cfg.getLong("user.seq"));
+								cs.registerOutParameter(7, OracleTypes.VARCHAR);
+								cs.executeUpdate();
+
+								error = cs.getString(7);
+							} catch (Exception e_) {
+								this.logger.error(e_);
+								error = e_.getMessage();
+							}
+
+							if (!StringEx.isEmpty(error)) {
+								break;
+							}
+						}
+					} else {
+						error = "상품 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit.vmRun.goods")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)";
+					}
+				} else {
+					error = "상품 쉬트가 존재하지 않습니다.";
+				}
+
+				if (!StringEx.isEmpty(error)) {
+					dbLib.close(conn, dbLib.ROLLBACK);
+
+					if (excel.exists()) {
+						excel.delete();
+					}
+
+					return error;
+				}
+			} else {
+				error = "Workbook이 존재하지 않습니다.";
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+
+			try {
+				if (workbook != null) {
+					workbook.close();
+					workbook = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return error;
+		}
+
+	// 미등록 상품 중 매출 기록이 없는 상품 삭제
+		try {
+			cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS_CLEAR (?)}");
+			cs.registerOutParameter(1, OracleTypes.VARCHAR);
+			cs.execute();
+
+			error = cs.getString(1);
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn, dbLib.ROLLBACK);
+			return error;
+		}
+
+	// 리소스 반환
+		dbLib.close(conn, dbLib.COMMIT);
+
+	// 파일 삭제
+		if (excel.exists()) {
+			excel.delete();
+		}
+
+		return null;
+	}
+	*/
+	public String regist(long company, File excel) throws Exception {
+		// 실행에 사용될 변수
+			DBLibrary dbLib = new DBLibrary(this.logger);
+			Connection conn = null;
+			CallableStatement cs = null;
+			Workbook workbook = null;
+			Sheet sheet = null;
+			String error = null;
+			String vcode = "";
+
+		// 인수 체크
+			if (company == 0) {
+				error = "소속이 존재하지 않습니다.";
+			} else if (excel == null || excel.length() <= 0) {
+				error = "등록하실 엑셀을 업로드하세요.";
+			} else if (!StringEx.inArray(FileEx.extension(excel.getName()), "xls".split(";"))) {
+				error = "XLS 파일만 등록이 가능합니다.";
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				if (excel.exists()) {
+					excel.delete();
+				}
+
+				return error;
+			}
+
+		// DB 연결
+			conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+			if (conn == null) {
+				if (excel.exists()) {
+					excel.delete();
+				}
+
+				return "DB 연결에 실패하였습니다.";
+			}
+
+		// COMMIT 설정
+			conn.setAutoCommit(false);
+
+		// 엑셀 읽기
+			try 
+			{
+				workbook = Workbook.getWorkbook(excel);
+
+				if (workbook != null) 
+				{
+					sheet = workbook.getSheet(0);
+
+					if (sheet != null) { // 자판기 등록
+						if (this.cfg.getInt("excel.limit.vmRun") > 0 && sheet.getRows() <= this.cfg.getInt("excel.limit.vmRun")) 
+						{
+							//cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_BATCH (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");							
+							cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_BATCH2 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+
+							for (int i = 1; i < sheet.getRows(); i++) 
+							{
+								Cell user = sheet.getCell(0, i);
+								Cell code = sheet.getCell(1, i);
+								Cell terminal = sheet.getCell(2, i);
+								Cell model = sheet.getCell(3, i);
+								Cell modem = sheet.getCell(4, i);
+								Cell place = sheet.getCell(5, i);
+
+								//if (user == null || code == null || terminal == null || place == null) {
+								if (user == null || code == null || terminal == null ) {
+									//continue;
+									if(user == null) throw new WarningException("[" + String.valueOf(i) + "행]담당자 계정이 없습니다.");
+									if(code == null) throw new WarningException("[" + String.valueOf(i) + "행]자판기 코드가 없습니다.");
+									if(terminal == null) throw new WarningException("[" + String.valueOf(i) + "행]단말기 ID가 없습니다.");
+								} 
+								//else if (StringEx.isEmpty(user.getContents()) || StringEx.isEmpty(code.getContents()) || StringEx.isEmpty(terminal.getContents()) || StringEx.isEmpty(place.getContents())) {
+								else if (StringEx.isEmpty(user.getContents()) || StringEx.isEmpty(code.getContents()) || StringEx.isEmpty(terminal.getContents())) {
+									//continue;								
+									if(StringEx.isEmpty(user.getContents())) throw new WarningException("[" + String.valueOf(i) + "행]담당자 계정이 없습니다.");
+									if(StringEx.isEmpty(code.getContents())) throw new WarningException("[" + String.valueOf(i) + "행]자판기 코드가 없습니다.");
+									if(StringEx.isEmpty(terminal.getContents())) throw new WarningException("[" + String.valueOf(i) + "행]단말기 ID가 없습니다.");
+								}
+
+									cs.setString(1, this.cfg.get("server"));
+									cs.setString(2, this.cfg.get("user.operator").equals("Y") ? this.cfg.get("user.id") : user.getContents());
+									cs.setLong(3, company);
+									cs.setString(4, code.getContents());
+									cs.setString(5, terminal.getContents());
+									cs.setString(6, model.getContents());
+									cs.setString(7, place.getContents());
+									cs.setString(8, modem.getContents());
+									cs.setLong(9, this.cfg.getLong("user.seq"));
+									cs.registerOutParameter(10, OracleTypes.VARCHAR);
+									cs.executeUpdate();
+
+									error = cs.getString(10);
+								
+
+								if (!StringEx.isEmpty(error)) {
+									//break;
+									throw new WarningException("[" + String.valueOf(i) + "행]"+ error);
+									
+								}
+							}
+							
+							
+						} 
+						else 
+						{
+							throw new WarningException("자판기 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit.vmRun")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)" );
+						}
+					} 
+					else 
+					{
+						throw new WarningException("자판기 쉬트가 존재하지 않습니다.");
+					}
+
+					cs.close();
+					//--------------------------------
+					
+					sheet = workbook.getSheet(1);
+
+					if (sheet != null) 
+					{ // 상품 등록
+						if (this.cfg.getInt("excel.limit.vmRun.goods") > 0 && sheet.getRows() <= this.cfg.getInt("excel.limit.vmRun.goods")) {
+							cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS_BATCH (?, ?, ?, ?, ?, ?, ?)}");
+
+							for (int i = 1; i < sheet.getRows(); i++) {
+								Cell vm = sheet.getCell(0, i);
+								Cell column = sheet.getCell(1, i);
+								Cell goods = sheet.getCell(2, i);
+
+								if (vm != null && !StringEx.isEmpty(vm.getContents())) {
+									vcode = vm.getContents();
+								}
+
+								if (column == null || goods == null) {
+									//continue;
+									if(column == null) throw new WarningException("[" + String.valueOf(i) + "행]상품시트의 컬럼정보가 없습니다.");
+									if(goods == null) throw new WarningException("[" + String.valueOf(i) + "행]상품시트의 상품정보가 없습니다.");
+									
+								} else if (StringEx.isEmpty(vcode) || StringEx.isEmpty(column.getContents()) || StringEx.isEmpty(goods.getContents())) {
+									//continue;
+									if(StringEx.isEmpty(vcode)) throw new WarningException("[" + String.valueOf(i) + "행]상품시트의 자판기코드가 없습니다.");
+									if(StringEx.isEmpty(column.getContents())) throw new WarningException("[" + String.valueOf(i) + "행]상품시트의 컬럼정보가 없습니다.");
+									if(StringEx.isEmpty(goods.getContents())) throw new WarningException("[" + String.valueOf(i) + "행]상품시트의 상품정보가 없습니다.");
+								}
+
+								
+									cs.setString(1, this.cfg.get("server"));
+									cs.setLong(2, company);
+									cs.setString(3, vcode);
+									cs.setInt(4, StringEx.str2int(column.getContents()));
+									cs.setString(5, goods.getContents());
+									cs.setLong(6, this.cfg.getLong("user.seq"));
+									cs.registerOutParameter(7, OracleTypes.VARCHAR);
+									cs.executeUpdate();
+
+									error = cs.getString(7);
+		
+								if (!StringEx.isEmpty(error)) {
+									//break;
+									throw new WarningException(error);
+								}
+							}
+						} else {
+							//error = "상품 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit.vmRun.goods")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)";
+							throw new WarningException("상품 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit.vmRun.goods")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)");
+						}
+					} else {
+						//error = "상품 쉬트가 존재하지 않습니다.";
+					}
+
+					if (!StringEx.isEmpty(error)) {
+						
+						throw new WarningException(error);
+					}
+					
+					cs.close();
+					
+					// 미등록 상품 중 매출 기록이 없는 상품 삭제
+					cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_GOODS_CLEAR (?)}");
+					cs.registerOutParameter(1, OracleTypes.VARCHAR);
+					cs.execute();
+
+					error = cs.getString(1);
+
+				// 에러 처리
+					if (!StringEx.isEmpty(error)) {
+						throw new WarningException(error);
+					}
+					
+					cs.close();
+
+				// 리소스 반환
+					dbLib.close(conn, dbLib.COMMIT);
+
+				// 파일 삭제
+					if (excel.exists()) {
+						excel.delete();
+					}
+					//----------------------------------
+				
+				}
+				else 
+				{
+					throw new WarningException("Workbook이 존재하지 않습니다.");
+				}
+			
+				if (excel.exists()) 
+				{
+					excel.delete();
+				}
+				
+				// 리소스 반환
+				dbLib.close(conn, dbLib.COMMIT);
+				
+				return null;
+			}
+			//waring처리
+			catch(WarningException Ex)
+			{
+				this.logger.warn(Ex);
+				dbLib.close(conn, dbLib.ROLLBACK);
+
+				if (excel.exists()) {
+					excel.delete();
+				}
+				return Ex.getMessage();
+			}
+			//error 처리
+			catch(SQLException Ex)
+			{
+				//this.logger.error(Ex);
+				this.logger.warn(Ex);
+				dbLib.close(conn, dbLib.ROLLBACK);
+
+				if (excel.exists()) {
+					excel.delete();
+				}
+				return Ex.getMessage();
+			}
+			catch(Exception Ex)
+			{
+				this.logger.error(Ex);
+				dbLib.close(conn, dbLib.ROLLBACK);
+
+				if (excel.exists()) {
+					excel.delete();
+				}
+				return Ex.getMessage();
+			}
+			finally
+			{
+				dbLib.close(conn);
+			}
+		}	
+	
+  public String CheckVmUpdate(String strVmSeq) {
+ 
+		// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		CallableStatement cs = null;
+	
+		String error = null;
+	
+	
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		
+		String  strReturn = null;
+		
+		try 
+		{
+
+				if (conn == null) {
+					throw new Exception("DB가 연결되지 않았습니다.");
+				}
+	
+			// COMMIT 설정
+				conn.setAutoCommit(false);
+
+			
+				cs = dbLib.prepareCall(conn, "{CALL SP_VENDING_MACHINE_CHECK (?,?,?)}");
+
+				cs.setString(1, this.cfg.get("server"));
+				cs.setString(2, this.cfg.get("server"));
+				cs.registerOutParameter(3, OracleTypes.VARCHAR);
+				cs.execute();
+					
+				error = cs.getString(3);
+				if (StringEx.isEmpty(error))
+				{
+					strReturn = "0";
+				}				
+				else if (!StringEx.isEmpty(error) && error.equals("1") ) {
+					strReturn = "1";					
+				}
+				else if (!StringEx.isEmpty(error) && !error.equals("1") )
+				{
+					throw new WarningException(error);
+				}
+						
+				//--------------------------------
+			
+			// 리소스 반환
+			dbLib.close(conn);
+			
+			return strReturn;
+		}
+		//waring처리
+		catch(WarningException Ex)
+		{
+			this.logger.warn(Ex);
+			strReturn = Ex.getMessage();
+			return strReturn;
+		}
+		//error 처리
+		catch(SQLException Ex)
+		{
+			//this.logger.error(Ex);
+			this.logger.warn(Ex);
+			strReturn = Ex.getMessage();
+			return strReturn;
+		}
+		catch(Exception Ex)
+		{
+			this.logger.error(Ex);
+			// 리소스 반환
+			strReturn = Ex.getMessage();
+			return strReturn;
+		}
+		finally
+		{
+			dbLib.close(conn);
+		}
+  }
+	
+	
+	
+/**
+ * 상품
+ *
+ * @param group 그룹
+ * @param sField 검색 필드
+ * @param sQuery 검색어
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String goods(long group, String sField, String sQuery) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "1 = 1";
+
+		if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속 및 허가된 상품 그룹군에 있는 상품만 검색
+			WHERE += " AND A.GROUP_SEQ IN (SELECT SEQ FROM TB_GROUP WHERE COMPANY_SEQ = " + this.cfg.getLong("user.company") + " UNION SELECT SEQ FROM TB_GROUP WHERE PARENT_SEQ IN (SELECT GROUP_SEQ FROM TB_GROUP_ENABLED WHERE COMPANY_SEQ = " + this.cfg.getLong("user.company") + " GROUP BY GROUP_SEQ))";
+		}
+
+		if (group > 0) {
+			WHERE += " AND A.GROUP_SEQ IN (SELECT SEQ FROM TB_GROUP START WITH PARENT_SEQ = " + group + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_GROUP WHERE SEQ = " + group + ")";
+		}
+
+		if (!StringEx.isEmpty(sField) && !StringEx.isEmpty(sQuery)) { // 키워드
+			WHERE += " AND " + sField + " LIKE '%" + sQuery + "%'";
+		}
+
+	// 목록
+		this.goods = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = dbLib.prepareStatement(conn, "SELECT /*+ INDEX(A PK_GOODS) */ SEQ, CODE, NAME FROM TB_GOODS A WHERE " + WHERE);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("CODE", rs.getString("CODE"));
+				c.put("NAME", rs.getString("NAME"));
+
+				this.goods.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 운영 정보 로그
+ *
+ * @param pageNo 페이지
+ * @param sDate 검색 시작일
+ * @param eDate 검색 종료일
+ * @param sQuery 검색어
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String log(int pageNo, String sDate, String eDate, String sQuery) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "1 = 1";
+
+		if (!StringEx.isEmpty(sQuery)) { // 단말기 ID
+			WHERE += " AND A.TERMINAL_ID = '" + sQuery + "'";
+		}
+
+		if (!StringEx.isEmpty(sDate)) { // 시작일
+			WHERE += " AND A.RESPONSE_DATE >= '" + sDate + "'";
+		}
+
+		if (!StringEx.isEmpty(eDate)) { // 종료일
+			WHERE += " AND A.RESPONSE_DATE <= '" + eDate + "'";
+		}
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND B.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND B.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND B.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ)";
+			}
+		}
+
+	// 총 레코드수
+		this.records = StringEx.str2long(dbLib.getResult(conn, "SELECT /*+ ORDERED USE_NL(B C) */ COUNT(*) FROM TB_TXT_STATUS A LEFT JOIN TB_VENDING_MACHINE B ON A.TERMINAL_ID = B.TERMINAL_ID LEFT JOIN TB_USER C ON B.USER_SEQ = C.SEQ WHERE " + WHERE));
+
+	// 총 페이지수
+		this.pages = Pager.getSize(this.records, cfg.getInt("limit.list"));
+
+	// 리스트 가상번호
+		long no = this.records - (pageNo - 1) * cfg.getInt("limit.list");
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+
+		try {
+			int s = ((pageNo - 1) * cfg.getInt("limit.list")) + 1;
+			int e = (s - 1) + cfg.getInt("limit.list");
+
+			ps = dbLib.prepareStatement(conn, "SELECT S2.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT ROWNUM AS RNUM, S1.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT /*+ ORDERED USE_NL(B C) INDEX_DESC(A UK_TXT_STATUS) */ A.TRANSACTION_NO, A.TERMINAL_ID, A.PLACE, TO_CHAR(A.CREATE_DATE, 'YYYY-MM-DD HH24:MI:SS') AS CREATE_DATE, FN_SOLD_OUT(A.SOLD_OUT) AS SOLD_OUT, FN_CONTROL_ERROR(A.CONTROL_ERROR) AS CONTROL_ERROR, FN_PD_ERROR(A.PD_ERROR) AS PD_ERROR, FN_EMPTY_COL(A.EMPTY_COL) AS EMPTY_COL, CASE A.RES_CODE WHEN '0000' THEN '정상' WHEN '0001' THEN '재전송' WHEN '0002' THEN '타임아웃' ELSE '에러' END AS RES_CODE"
+				+ " FROM TB_TXT_STATUS A"
+				+ " LEFT JOIN TB_VENDING_MACHINE B ON A.TERMINAL_ID = B.TERMINAL_ID"
+				+ " LEFT JOIN TB_USER C ON B.USER_SEQ = C.SEQ"
+				+ " WHERE " + WHERE
+				+ " ) S1"
+				+ " WHERE ROWNUM <= " + e
+				+ " ) S2"
+				+ " WHERE RNUM >= " + s);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("TRANSACTION_NO", rs.getString("TRANSACTION_NO"));
+				c.put("TERMINAL_ID", rs.getString("TERMINAL_ID"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("CREATE_DATE", rs.getString("CREATE_DATE"));
+				c.put("SOLD_OUT", rs.getString("SOLD_OUT"));
+				c.put("CONTROL_ERROR", rs.getString("CONTROL_ERROR"));
+				c.put("PD_ERROR", rs.getString("PD_ERROR"));
+				c.put("EMPTY_COL", rs.getString("EMPTY_COL"));
+				c.put("RES_CODE", rs.getString("RES_CODE"));
+				c.put("NO", no--);
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 삭제
+ *
+ * @param seq 등록번호
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String delete(long seq) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 판매 기록 체크
+		long check = StringEx.str2long(dbLib.getResult(conn, "SELECT COUNT(*) FROM TB_SALES WHERE VM_PLACE_SEQ IN (SELECT SEQ FROM TB_VENDING_MACHINE_PLACE WHERE VM_SEQ = " + seq + ")"));
+
+		if (check > 0) {
+			error = "삭제하고자 하는 자판기의 판매 기록이 존재합니다.";
+		}
+
+	// 삭제
+		if (StringEx.isEmpty(error)) {
+			try {
+				ps = dbLib.prepareStatement(conn, "DELETE FROM TB_VENDING_MACHINE WHERE SEQ = ?");
+				ps.setLong(1, seq);
+				ps.executeUpdate();
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(ps);
+			}
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 마스터 목록
+ *
+ * @param company 소속
+ * @param pageNo 페이지
+ * @param sField 검색 필드
+ * @param sQuery 검색어
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, int pageNo, String sField, String sQuery) throws Exception {
+		return this.master(company, pageNo, sField, sQuery, true);
+	}
+/**
+ * 마스터 목록
+ *
+ * @param company 소속
+ * @param pageNo 페이지
+ * @param sField 검색 필드
+ * @param sQuery 검색어
+ * @param isAll 전체 검색 여부
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, int pageNo, String sField, String sQuery, boolean isAll) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 소속
+		this.company = new ArrayList<GeneralConfig>();
+
+		if (isAll) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT /*+ INDEX(A PK_COMPANY) */ SEQ, NAME FROM TB_COMPANY A WHERE (CASE WHEN ? > 0 THEN SEQ ELSE 1 END) = (CASE WHEN ? > 0 THEN ? ELSE 1 END)");
+				ps.setLong(1, this.cfg.getLong("user.company"));
+				ps.setLong(2, this.cfg.getLong("user.company"));
+				ps.setLong(3, this.cfg.getLong("user.company"));
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("SEQ", rs.getLong("SEQ"));
+					c.put("NAME", rs.getString("NAME"));
+
+					this.company.add(c);
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				dbLib.close(conn);
+				return error;
+			}
+		}
+
+	// 검색절 생성
+		String WHERE = "1 = 1";
+
+		if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+			WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (!isAll) { // 미운영 자판기만
+			WHERE += " AND C.SEQ IS NULL";
+		}
+
+		if (!StringEx.isEmpty(sField) && !StringEx.isEmpty(sQuery)) { // 키워드
+			WHERE += " AND " + sField + " LIKE '%" + sQuery + "%'";
+		}
+
+	// 총 레코드수
+		this.records = StringEx.str2long(dbLib.getResult(conn, "SELECT /*+ ORDERED USE_NL(C) */ COUNT(*) FROM TB_MASTER_VENDING_MACHINE A LEFT JOIN TB_VENDING_MACHINE C ON (A.COMPANY_SEQ = C.COMPANY_SEQ AND A.CODE = C.CODE) WHERE " + WHERE));
+
+	// 총 페이지수
+		this.pages = Pager.getSize(this.records, cfg.getInt("limit.list"));
+
+	// 리스트 가상번호
+		long no = this.records - (pageNo - 1) * cfg.getInt("limit.list");
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+
+		try {
+			int s = ((pageNo - 1) * cfg.getInt("limit.list")) + 1;
+			int e = (s - 1) + cfg.getInt("limit.list");
+
+			ps = dbLib.prepareStatement(conn, "SELECT S2.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT ROWNUM AS RNUM, S1.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT /*+ ORDERED USE_NL(B C) INDEX_DESC(A UK_MASTER_VM) */ A.COMPANY_SEQ, A.CODE, A.REGION, A.PLACE, A.MODEL, TO_CHAR(A.CREATE_DATE, 'YYYY-MM-DD') AS CREATE_DATE, TO_CHAR(A.MODIFY_DATE, 'YYYY-MM-DD') AS MODIFY_DATE, B.NAME AS COMPANY"
+				+ " FROM TB_MASTER_VENDING_MACHINE A LEFT JOIN TB_COMPANY B ON A.COMPANY_SEQ = B.SEQ LEFT JOIN TB_VENDING_MACHINE C ON (A.COMPANY_SEQ = C.COMPANY_SEQ AND A.CODE = C.CODE)"
+				+ " WHERE " + WHERE
+				+ " ) S1"
+				+ " WHERE ROWNUM <= " + e
+				+ " ) S2"
+				+ " WHERE RNUM >= " + s);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				c.put("CODE", rs.getString("CODE"));
+				c.put("REGION", rs.getString("REGION"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("MODEL", rs.getString("MODEL"));
+				c.put("CREATE_DATE", rs.getString("CREATE_DATE"));
+				c.put("MODIFY_DATE", rs.getString("MODIFY_DATE"));
+				c.put("COMPANY", rs.getString("COMPANY"));
+				c.put("NO", no--);
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn);
+			return error;
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return null;
+	}
+/**
+ * 마스터 조회
+ *
+ * @param company 소속
+ * @param code 코드
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, String code) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 소속
+		this.company = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = dbLib.prepareStatement(conn, "SELECT /*+ INDEX(A PK_COMPANY) */ SEQ, NAME FROM TB_COMPANY A WHERE (CASE WHEN ? > 0 THEN SEQ ELSE 1 END) = (CASE WHEN ? > 0 THEN ? ELSE 1 END)");
+			ps.setLong(1, this.cfg.getLong("user.company"));
+			ps.setLong(2, this.cfg.getLong("user.company"));
+			ps.setLong(3, this.cfg.getLong("user.company"));
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("NAME", rs.getString("NAME"));
+
+				this.company.add(c);
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(rs);
+			dbLib.close(ps);
+		}
+
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn);
+			return error;
+		}
+
+	// 등록된 내용 가져오기
+		this.data = new GeneralConfig();
+
+		if (company > 0 && !StringEx.isEmpty(code)) {
+			try {
+				ps = dbLib.prepareStatement(conn, "SELECT * FROM TB_MASTER_VENDING_MACHINE WHERE COMPANY_SEQ = ? AND CODE = ? AND (CASE WHEN ? > 0 THEN COMPANY_SEQ ELSE 1 END) = (CASE WHEN ? > 0 THEN ? ELSE 1 END)");
+				ps.setLong(1, company);
+				ps.setString(2, code);
+				ps.setLong(3, this.cfg.getLong("user.company"));
+				ps.setLong(4, this.cfg.getLong("user.company"));
+				ps.setLong(5, this.cfg.getLong("user.company"));
+				rs = ps.executeQuery();
+
+				if (rs.next()) {
+					this.data.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+					this.data.put("CODE", rs.getString("CODE"));
+					this.data.put("REGION", rs.getString("REGION"));
+					this.data.put("PLACE", rs.getString("PLACE"));
+					this.data.put("MODEL", rs.getString("MODEL"));
+				} else {
+					error = "등록되지 않았거나 수정할 권한이 없는 자판기입니다.";
+				}
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(rs);
+				dbLib.close(ps);
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				dbLib.close(conn);
+				return error;
+			}
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return null;
+	}
+/**
+ * 마스터 등록/수정
+ *
+ * @param company 소속
+ * @param code 코드
+ * @param region 설치지역
+ * @param place 설치위치
+ * @param model 모델
+ * @param isAuto 코드 자동생성 여부
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, String code, String region, String place, String model, boolean isAuto) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		CallableStatement cs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 코드
+		if (isAuto) {
+			code = dbLib.getResult(conn, "SELECT LPAD(TO_CHAR(NVL(MAX(TO_NUMBER(CODE)), 0) + 1), 8, '0') FROM TB_MASTER_VENDING_MACHINE WHERE COMPANY_SEQ = " + company);
+		}
+
+	// 등록/수정
+		try {
+			cs = dbLib.prepareCall(conn, "{CALL SP_MASTER_VENDING_MACHINE (?, ?, ?, ?, ?, ?, ?, ?)}");
+			cs.setString(1, this.cfg.get("server"));
+			cs.setLong(2, company);
+			cs.setString(3, code);
+			cs.setString(4, region);
+			cs.setString(5, place);
+			cs.setString(6, model);
+			cs.setLong(7, this.cfg.getLong("user.seq"));
+			cs.registerOutParameter(8, OracleTypes.VARCHAR);
+			cs.execute();
+
+			if (cs.getString(8) != null && cs.getString(8).equals("Y")) {
+				error = "예기치 않은 오류가 발생하여 자판기를 등록하는데 실패하였습니다.";
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+/**
+ * 마스터 일괄등록
+ *
+ * @param company 소속
+ * @param excel 엑셀
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, File excel) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		CallableStatement cs = null;
+		Workbook workbook = null;
+		Sheet sheet = null;
+		String error = null;
+		String startDate = DateTime.date("yyyyMMddHHmmss");
+		int success = 0;
+		int failure = 0;
+
+	// 인수 체크
+		if (company == 0) {
+			error = "소속이 존재하지 않습니다.";
+		} else if (excel == null || excel.length() <= 0) {
+			error = "등록하실 엑셀을 업로드하세요.";
+		} else if (!StringEx.inArray(FileEx.extension(excel.getName()), "xls".split(";"))) {
+			error = "XLS 파일만 등록이 가능합니다.";
+		}
+
+		if (!StringEx.isEmpty(error)) {
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return error;
+		}
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 엑셀 읽기
+		try {
+			workbook = Workbook.getWorkbook(excel);
+
+			if (workbook != null) {
+				sheet = workbook.getSheet(0);
+
+				if (sheet != null) {
+					if (sheet.getRows() <= 0) {
+						error = "엑셀에 데이터가 존재하지 않습니다.";
+					} else {
+						if (this.cfg.getInt("excel.limit") > 0 && sheet.getRows() <= this.cfg.getInt("excel.limit")) {
+							cs = dbLib.prepareCall(conn, "{CALL SP_MASTER_VENDING_MACHINE (?, ?, ?, ?, ?, ?, ?, ?)}");
+
+							for (int i = 1; i < sheet.getRows(); i++) {
+								Cell code = sheet.getCell(0, i);
+								Cell region = sheet.getCell(1, i);
+								Cell place = sheet.getCell(2, i);
+								Cell model = sheet.getCell(3, i);
+
+								if (code == null || place == null) {
+									continue;
+								}
+
+								try {
+									cs.setString(1, this.cfg.get("server"));
+									cs.setLong(2, company);
+									cs.setString(3, code.getContents());
+									cs.setString(4, region.getContents());
+									cs.setString(5, place.getContents());
+									cs.setString(6, model.getContents());
+									cs.setLong(7, this.cfg.getLong("user.seq"));
+									cs.registerOutParameter(8, OracleTypes.VARCHAR);
+									cs.execute();
+
+									if (cs.getString(8) != null && cs.getString(8).equals("Y")) {
+										failure++;
+									} else {
+										success++;
+									}
+								} catch (Exception e_) {
+									this.logger.error(e_);
+									error = e_.getMessage();
+								}
+
+								if (!StringEx.isEmpty(error)) {
+									break;
+								}
+							}
+						} else {
+							error = "엑셀 데이터를 " + StringEx.comma(this.cfg.getInt("excel.limit")) + "건을 초과하여 등록할 수 없습니다. (라인수 = " + StringEx.comma(sheet.getRows() - 1) + "건)";
+						}
+					}
+				} else {
+					error = "Sheet가 존재하지 않습니다.";
+				}
+			} else {
+				error = "Workbook이 존재하지 않습니다.";
+			}
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+
+			try {
+				if (workbook != null) {
+					workbook.close();
+					workbook = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn);
+
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return error;
+		}
+
+	// 배치 기록
+		try {
+			cs = dbLib.prepareCall(conn, "{CALL SP_BATCH_LOG (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)}");
+			cs.setString(1, this.cfg.get("server"));
+			cs.setString(2, "WEB");
+			cs.setInt(3, success);
+			cs.setInt(4, failure);
+			cs.setString(5, startDate.substring(0, 8));
+			cs.setString(6, startDate.substring(8, 14));
+			cs.setString(7, DateTime.date("yyyyMMdd"));
+			cs.setString(8, DateTime.date("HHmmss"));
+			cs.setString(9, "");
+			cs.setString(10, "자판기 마스터 일괄 등록 완료");
+			cs.execute();
+		} catch (Exception e) {
+			this.logger.error(e);
+			error = e.getMessage();
+		} finally {
+			dbLib.close(cs);
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			dbLib.close(conn);
+
+			if (excel.exists()) {
+				excel.delete();
+			}
+
+			return error;
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+	// 파일 삭제
+		if (excel.exists()) {
+			excel.delete();
+		}
+
+		return null;
+	}
+/**
+ * 마스터 삭제
+ *
+ * @param company 소속
+ * @param code 코드
+ * @param isDel 삭제여부
+ * @return 에러가 있을 경우 에러 내용
+ *
+ */
+	public String master(long company, String code, boolean isDel) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary(this.logger);
+		Connection conn = null;
+		PreparedStatement ps = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 삭제
+		if (StringEx.isEmpty(error)) {
+			try {
+				ps = dbLib.prepareStatement(conn, "DELETE FROM TB_MASTER_VENDING_MACHINE WHERE COMPANY_SEQ = ? AND CODE = ?");
+				ps.setLong(1, company);
+				ps.setString(2, code);
+				ps.executeUpdate();
+			} catch (Exception e) {
+				this.logger.error(e);
+				error = e.getMessage();
+			} finally {
+				dbLib.close(ps);
+			}
+		}
+
+	// 리소스 반환
+		dbLib.close(conn);
+
+		return error;
+	}
+}

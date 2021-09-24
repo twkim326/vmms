@@ -1,0 +1,32 @@
+diff a/WebContent/prod/web/src/service/ServiceVMRegist.jsp b/WebContent/prod/web/src/service/ServiceVMRegist.jsp	(rejected hunks)
+@@ -317,10 +317,26 @@
+ 		</td>
+ 	</tr>
+ 	<tr>
+-		<th <% if (objVM.error.size() == 0) { %> class="last"<% } %>><span>설치 위치 코드</span></th>
+-		<td <% if (objVM.error.size() == 0) { %> class="last"<% } %>><input type="text" name="place_code" id="place_code" value="<%=Html.getText(objVM.data.get("PLACE_CODE"))%>" class="checkForm txtInput" maxlength="20" /></td>
+-		<th <% if (objVM.error.size() == 0) { %> class="last"<% } %>><span>설치 위치 번호</span></th>
+-		<td <% if (objVM.error.size() == 0) { %> class="last"<% } %>><input type="text" name="place_no" id="place_no" value="<%=Html.getText(objVM.data.get("PLACE_NO"))%>" class="checkForm txtInput" maxlength="20" /></td>
++		<th <% if (objVM.error.size() == 0)  %>><span>설치 위치 코드</span></th>
++		<td <% if (objVM.error.size() == 0)  %>><input type="text" name="place_code" id="place_code" value="<%=Html.getText(objVM.data.get("PLACE_CODE"))%>" class="checkForm txtInput" maxlength="20" /></td>
++		<th <% if (objVM.error.size() == 0)  %>><span>설치 위치 번호</span></th>
++		<td <% if (objVM.error.size() == 0)  %>><input type="text" name="place_no" id="place_no" value="<%=Html.getText(objVM.data.get("PLACE_NO"))%>" class="checkForm txtInput" maxlength="20" /></td>
++	</tr>
++	<!-- 비가동 상태 여부 체크 하는 로직 추가.-->
++	<tr>
++		<th <% if (objVM.error.size() == 0) { %> class="last"<% } %>><span>비가동 여부</span></th>
++		<td <% if (objVM.error.size() == 0) { %> class="last"<% } %>>
++			<span>
++				<select name="accessStatus" id="accessStatus" class="checkForm">
++					<option value="O" <% if("O".equals(objVM.data.get("ACCESS_STATUS"))){ %> selected <%}%> >-상태</option>
++					<option value="C" <% if("C".equals(objVM.data.get("ACCESS_STATUS"))){ %> selected <%}%>>폐점</option>
++					<option value="R" <% if("R".equals(objVM.data.get("ACCESS_STATUS"))){ %> selected <%}%>>휴점</option>
++				</select>
++			</span>
++		</td>
++		<th class="last"><span></span></th>
++		<td class="last">
++		</td>
+ 	</tr>
+ <% if (objVM.error.size() > 0) { %>
+ 	<tr>

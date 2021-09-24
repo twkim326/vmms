@@ -1,0 +1,2424 @@
+package com.nucco.beans;
+
+/**
+ * Sales.java
+ *
+ * 매출
+ *
+ * 작성일 - 2011/04/05, 정원광
+ *
+ */
+
+import java.util.*;
+import java.sql.*;
+import java.io.*;
+import oracle.jdbc.driver.*;
+import javax.servlet.http.*;
+import com.nucco.*;
+import com.nucco.cfg.*;
+import com.nucco.lib.*;
+import com.nucco.lib.db.DBLibrary;
+import jxl.Workbook;
+import jxl.Sheet;
+import jxl.Cell;
+
+public class Sales {
+/**
+ * 사이트 설정
+ *
+ */
+	private GlobalConfig cfg;
+/**
+ * 소속
+ *
+ */
+	public ArrayList<GeneralConfig> company;
+/**
+ * 조직
+ *
+ */
+	public ArrayList<GeneralConfig> organ;
+/**
+ * 위치
+ *
+ */
+	public ArrayList<GeneralConfig> place;
+/**
+ * 상품
+ *
+ */
+	public ArrayList<GeneralConfig> goods;
+/**
+ * 결제 방식
+ *
+ */
+	public ArrayList<GeneralConfig> payment;
+/**
+ * 결제 진행 상태
+ *
+ */
+	public ArrayList<GeneralConfig> step;
+/**
+ * 선불
+ *
+ */
+	public ArrayList<GeneralConfig> prepay;
+/**
+ * 카드
+ *
+ */
+	public ArrayList<GeneralConfig> card;
+/**
+ * 목록
+ *
+ */
+	public ArrayList<GeneralConfig> list;
+/**
+ * 조회
+ *
+ */
+	public GeneralConfig data;
+/**
+ * 총 레코드수
+ *
+ */
+	public long records;
+/**
+ * 총 페이지수
+ *
+ */
+	public long pages;
+/**
+ *
+ */
+	public Sales(GlobalConfig cfg) throws Exception {
+		this.cfg = cfg;
+	}
+/**
+ * 매출 현황
+ *
+ * @param mode 유형
+ * @return string
+ *
+ */
+	public String report(int mode) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 소속
+		this.company = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ INDEX(A PK_COMPANY) */ SEQ, NAME, (SELECT NVL(MAX(DEPTH), 0) FROM TB_ORGANIZATION WHERE COMPANY_SEQ = A.SEQ) AS DEPTH FROM TB_COMPANY A WHERE (CASE WHEN ? > 0 THEN SEQ ELSE 1 END) = (CASE WHEN ? > 0 THEN ? ELSE 1 END)");
+			ps.setLong(1, this.cfg.getLong("user.company"));
+			ps.setLong(2, this.cfg.getLong("user.company"));
+			ps.setLong(3, this.cfg.getLong("user.company"));
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("NAME", rs.getString("NAME"));
+				c.put("DEPTH", rs.getInt("DEPTH"));
+
+				this.company.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 조직 및 설치 위치
+		if (this.cfg.getLong("user.organ") > 0) {
+		// 최상위 조직 타이틀
+			this.data = new GeneralConfig();
+
+			try {
+				ps = conn.prepareStatement("SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = ? AND DEPTH = 0 AND ROWNUM = 1");
+				ps.setLong(1, this.cfg.getLong("user.company"));
+				rs = ps.executeQuery();
+
+				if (rs.next()) {
+					this.data.put("TITLE", rs.getString("NAME"));
+				}
+			} catch (Exception e) {
+				error = e.getMessage();
+			} finally {
+				try {
+					if (rs != null) {
+						rs.close();
+						rs = null;
+					}
+				} catch (Exception e_) {
+				}
+
+				try {
+					if (ps != null) {
+						ps.close();
+						ps = null;
+					}
+				} catch (Exception e_) {
+				}
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				try {
+					if (conn != null) {
+						conn.close();
+						conn = null;
+					}
+				} catch (Exception e) {
+				}
+
+				return error;
+			}
+
+		// 최상위 조직 목록
+		// :: 내가 속한 조직의 최상위 단계 및 나에게 조회가 허락된 조직의 최상위 단계
+		// :: 자판기 운영자일 경우, 과거 조직 중 매출이 발생한 조직 추가
+			this.organ = new ArrayList<GeneralConfig>();
+
+			try {
+				if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+					ps = conn.prepareStatement("SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE DEPTH = 0 START WITH SEQ = ? CONNECT BY SEQ = PRIOR PARENT_SEQ"
+						+ " UNION"
+						+ " SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE DEPTH = 0 START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY SEQ = PRIOR PARENT_SEQ"
+						+ " UNION"
+						+ " SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE DEPTH = 0 START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_SALES WHERE USER_SEQ = ? GROUP BY ORGANIZATION_SEQ) CONNECT BY SEQ = PRIOR PARENT_SEQ");
+					ps.setLong(1, this.cfg.getLong("user.organ"));
+					ps.setLong(2, this.cfg.getLong("user.seq"));
+					ps.setLong(3, this.cfg.getLong("user.seq"));
+					rs = ps.executeQuery();
+				} else {
+					ps = conn.prepareStatement("SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE DEPTH = 0 START WITH SEQ = ? CONNECT BY SEQ = PRIOR PARENT_SEQ"
+						+ " UNION"
+						+ " SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE DEPTH = 0 START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY SEQ = PRIOR PARENT_SEQ");
+					ps.setLong(1, this.cfg.getLong("user.organ"));
+					ps.setLong(2, this.cfg.getLong("user.seq"));
+					rs = ps.executeQuery();
+				}
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("SEQ", rs.getLong("SEQ"));
+					c.put("NAME", rs.getString("NAME"));
+
+					this.organ.add(c);
+				}
+			} catch (Exception e) {
+				error = e.getMessage();
+			} finally {
+				try {
+					if (rs != null) {
+						rs.close();
+						rs = null;
+					}
+				} catch (Exception e_) {
+				}
+
+				try {
+					if (ps != null) {
+						ps.close();
+						ps = null;
+					}
+				} catch (Exception e_) {
+				}
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				try {
+					if (conn != null) {
+						conn.close();
+						conn = null;
+					}
+				} catch (Exception e) {
+				}
+
+				return error;
+			}
+
+		// 설치 위치
+			this.place = new ArrayList<GeneralConfig>();
+
+			try {
+				if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+					ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM) */ A.SEQ, A.PLACE FROM TB_VENDING_MACHINE_PLACE A INNER JOIN TB_SALES B ON A.SEQ = B.VM_PLACE_SEQ WHERE B.USER_SEQ = ? GROUP BY A.SEQ, A.PLACE");
+					ps.setLong(1, this.cfg.getLong("user.seq"));
+					rs = ps.executeQuery();
+				} else {
+					ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM) */ A.SEQ, A.PLACE FROM TB_VENDING_MACHINE_PLACE A INNER JOIN TB_SALES B ON A.SEQ = B.VM_PLACE_SEQ WHERE B.COMPANY_SEQ = ? AND B.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = ? UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) GROUP BY A.SEQ, A.PLACE");
+					ps.setLong(1, this.cfg.getLong("user.company"));
+					ps.setLong(2, this.cfg.getLong("user.organ"));
+					ps.setLong(3, this.cfg.getLong("user.organ"));
+					ps.setLong(4, this.cfg.getLong("user.seq"));
+					ps.setLong(5, this.cfg.getLong("user.seq"));
+					rs = ps.executeQuery();
+				}
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("SEQ", rs.getLong("SEQ"));
+					c.put("PLACE", rs.getString("PLACE"));
+
+					this.place.add(c);
+				}
+			} catch (Exception e) {
+				error = e.getMessage();
+			} finally {
+				try {
+					if (rs != null) {
+						rs.close();
+						rs = null;
+					}
+				} catch (Exception e_) {
+				}
+
+				try {
+					if (ps != null) {
+						ps.close();
+						ps = null;
+					}
+				} catch (Exception e_) {
+				}
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				try {
+					if (conn != null) {
+						conn.close();
+						conn = null;
+					}
+				} catch (Exception e) {
+				}
+
+				return error;
+			}
+		}
+
+	// 유형별 추가 정보
+		switch (mode) {
+			case 1 : // 상세 매출
+			// 결제 방식
+				this.payment = new ArrayList<GeneralConfig>();
+
+				try {
+					ps = conn.prepareStatement("SELECT CODE, NAME FROM TB_CODE WHERE TYPE = 'PAY_TYPE' AND CODE NOT IN ('000') ORDER BY CODE");
+					rs = ps.executeQuery();
+
+					while (rs.next()) {
+						GeneralConfig c = new GeneralConfig();
+
+						c.put("CODE", rs.getString("CODE"));
+						c.put("NAME", rs.getString("NAME"));
+
+						this.payment.add(c);
+					}
+				} catch (Exception e) {
+					error = e.getMessage();
+				} finally {
+					try {
+						if (rs != null) {
+							rs.close();
+							rs = null;
+						}
+					} catch (Exception e_) {
+					}
+
+					try {
+						if (ps != null) {
+							ps.close();
+							ps = null;
+						}
+					} catch (Exception e_) {
+					}
+				}
+
+				if (!StringEx.isEmpty(error)) {
+					try {
+						if (conn != null) {
+							conn.close();
+							conn = null;
+						}
+					} catch (Exception e) {
+					}
+
+					return error;
+				}
+
+			// 결제 진행 상태
+				this.step = new ArrayList<GeneralConfig>();
+
+				try {
+					ps = conn.prepareStatement("SELECT CODE, NAME FROM TB_CODE WHERE TYPE = 'PAY_STEP' AND CODE NOT IN ('000') ORDER BY CODE");
+					rs = ps.executeQuery();
+
+					while (rs.next()) {
+						GeneralConfig c = new GeneralConfig();
+
+						c.put("CODE", rs.getString("CODE"));
+						c.put("NAME", rs.getString("NAME"));
+
+						this.step.add(c);
+					}
+				} catch (Exception e) {
+					error = e.getMessage();
+				} finally {
+					try {
+						if (rs != null) {
+							rs.close();
+							rs = null;
+						}
+					} catch (Exception e_) {
+					}
+
+					try {
+						if (ps != null) {
+							ps.close();
+							ps = null;
+						}
+					} catch (Exception e_) {
+					}
+				}
+
+				if (!StringEx.isEmpty(error)) {
+					try {
+						if (conn != null) {
+							conn.close();
+							conn = null;
+						}
+					} catch (Exception e) {
+					}
+
+					return error;
+				}
+
+				break;
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return null;
+	}
+/**
+ * 조직 검색
+ *
+ * @param organ 조직
+ * @param depth 깊이
+ * @return string
+ *
+ */
+	public String organ(long organ, int depth) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 하위 조직 타이틀
+		this.data = new GeneralConfig();
+
+		try {
+			ps = conn.prepareStatement("SELECT NAME FROM TB_ORGANIZATION A WHERE COMPANY_SEQ = ? AND DEPTH = ? AND SORT = 0 AND ROWNUM = 1");
+			ps.setLong(1, this.cfg.getLong("user.company"));
+			ps.setLong(2, depth);
+			rs = ps.executeQuery();
+
+			if (rs.next()) {
+				this.data.put("DISPLAY", rs.getString("NAME"));
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 하위 조직 검색
+	// :: 내가 속한 조직 및 나에게 조회가 허락된 조직에서의 트리
+	// :: 자판기 운영자일 경우, 과거 조직 중 매출이 발생한 조직 추가
+		this.organ = new ArrayList<GeneralConfig>();
+
+		try {
+			if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+				ps = conn.prepareStatement("SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE SEQ IN ("
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH SEQ = ? CONNECT BY SEQ = PRIOR PARENT_SEQ"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? AND PARENT_SEQ = ?"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY SEQ = PRIOR PARENT_SEQ"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY PRIOR SEQ = PARENT_SEQ"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_SALES WHERE USER_SEQ = ? GROUP BY ORGANIZATION_SEQ) CONNECT BY SEQ = PRIOR PARENT_SEQ"
+					+ " ) START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ");
+				ps.setInt(1, depth);
+				ps.setLong(2, this.cfg.getLong("user.organ"));
+				ps.setInt(3, depth);
+				ps.setLong(4, this.cfg.getLong("user.organ"));
+				ps.setInt(5, depth);
+				ps.setLong(6, this.cfg.getLong("user.seq"));
+				ps.setInt(7, depth);
+				ps.setLong(8, this.cfg.getLong("user.seq"));
+				ps.setInt(9, depth);
+				ps.setLong(10, this.cfg.getLong("user.seq"));
+				ps.setLong(11, organ);
+				rs = ps.executeQuery();
+			} else {
+				ps = conn.prepareStatement("SELECT SEQ, NAME FROM TB_ORGANIZATION WHERE SEQ IN ("
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH SEQ = ? CONNECT BY SEQ = PRIOR PARENT_SEQ "
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? AND PARENT_SEQ = ?"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY SEQ = PRIOR PARENT_SEQ"
+					+ " UNION"
+					+ " SELECT SEQ FROM TB_ORGANIZATION WHERE DEPTH = ? START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY PRIOR SEQ = PARENT_SEQ"
+					+ " ) START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ");
+				ps.setInt(1, depth);
+				ps.setLong(2, this.cfg.getLong("user.organ"));
+				ps.setInt(3, depth);
+				ps.setLong(4, this.cfg.getLong("user.organ"));
+				ps.setInt(5, depth);
+				ps.setLong(6, this.cfg.getLong("user.seq"));
+				ps.setInt(7, depth);
+				ps.setLong(8, this.cfg.getLong("user.seq"));
+				ps.setLong(9, organ);
+				rs = ps.executeQuery();
+			}
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("NAME", rs.getString("NAME"));
+
+				this.organ.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 설치 위치
+		error = this.place(organ);
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return null;
+	}
+/**
+ * 설치 위치
+ *
+ * @param organ 조직
+ * @return string
+ *
+ */
+	public String place(long organ) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색
+		this.place = new ArrayList<GeneralConfig>();
+
+		try {
+			if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+				ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM) */ A.SEQ, A.PLACE FROM TB_VENDING_MACHINE_PLACE A INNER JOIN TB_SALES B ON A.SEQ = B.VM_PLACE_SEQ WHERE B.USER_SEQ = ? AND B.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = ?) GROUP BY A.SEQ, A.PLACE");
+				ps.setLong(1, this.cfg.getLong("user.seq"));
+				ps.setLong(2, organ);
+				ps.setLong(3, organ);
+				rs = ps.executeQuery();
+			} else {
+				ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) INDEX(A PK_VM) */ A.SEQ, A.PLACE FROM TB_VENDING_MACHINE_PLACE A INNER JOIN TB_SALES B ON A.SEQ = B.VM_PLACE_SEQ WHERE B.COMPANY_SEQ = ? AND B.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = ? UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = ?) AND B.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = ? CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = ?) GROUP BY A.SEQ, A.PLACE");
+				ps.setLong(1, this.cfg.getLong("user.company"));
+				ps.setLong(2, this.cfg.getLong("user.organ"));
+				ps.setLong(3, this.cfg.getLong("user.organ"));
+				ps.setLong(4, this.cfg.getLong("user.seq"));
+				ps.setLong(5, this.cfg.getLong("user.seq"));
+				ps.setLong(6, organ);
+				ps.setLong(7, organ);
+				rs = ps.executeQuery();
+			}
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("PLACE", rs.getString("PLACE"));
+
+				this.place.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 일별 매출 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @return string
+ *
+ */
+	public String daily(String sType, long company, long organ, long place, String sDate, String eDate) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMMDD BETWEEN '" + sDate + "' AND '" + eDate + "'";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			long[] cnt = {0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", A.YYYY, A.MM, A.DD, A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME AS ORGAN"
+				+ " FROM TB_SALES_DAILY A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY A.YYYY, A.MM, A.DD, A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME"
+				+ " ORDER BY A.YYYY DESC, A.MM DESC, A.DD DESC");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("YYYY", rs.getString("YYYY"));
+				c.put("MM", rs.getString("MM"));
+				c.put("DD", rs.getString("DD"));
+				c.put("DATE", rs.getString("YYYY") + "-" + rs.getString("MM") + "-" + rs.getString("DD"));
+				c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+				c.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.list.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_TOTAL");
+			}
+
+			this.data.put("CNT_CARD", cnt[0]);
+			this.data.put("CNT_CASH", cnt[1]);
+			this.data.put("CNT_PREPAY", cnt[2]);
+			this.data.put("CNT_TOTAL", cnt[3]);
+			this.data.put("AMOUNT_CARD", amt[0]);
+			this.data.put("AMOUNT_CASH", amt[1]);
+			this.data.put("AMOUNT_PREPAY", amt[2]);
+			this.data.put("AMOUNT_TOTAL", amt[3]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 조직명
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 월별 매출 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @return string
+ *
+ */
+	public String monthly(String sType, long company, long organ, long place, String sDate, String eDate) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMM BETWEEN '" + sDate + "' AND '" + eDate + "'";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			long[] cnt = {0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", A.YYYY, A.MM, A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME AS ORGAN"
+				+ " FROM TB_SALES_MONTHLY A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY A.YYYY, A.MM, A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME"
+				+ " ORDER BY A.YYYY DESC, A.MM DESC");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("YYYY", rs.getString("YYYY"));
+				c.put("MM", rs.getString("MM"));
+				c.put("DATE", rs.getString("YYYY") + "-" + rs.getString("MM"));
+				c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+				c.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.list.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_TOTAL");
+			}
+
+			this.data.put("CNT_CARD", cnt[0]);
+			this.data.put("CNT_CASH", cnt[1]);
+			this.data.put("CNT_PREPAY", cnt[2]);
+			this.data.put("CNT_TOTAL", cnt[3]);
+			this.data.put("AMOUNT_CARD", amt[0]);
+			this.data.put("AMOUNT_CASH", amt[1]);
+			this.data.put("AMOUNT_PREPAY", amt[2]);
+			this.data.put("AMOUNT_TOTAL", amt[3]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 조직명
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 자판기별 매출 현황
+ *
+ * @param nType 선택된 날짜
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @return string
+ *
+ */
+	public String vm(String sType, long company, long organ, long place, String sDate, String eDate) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMMDD BETWEEN '" + sDate + "' AND '" + eDate + "'";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			long[] cnt = {0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME AS ORGAN"
+				+ " FROM TB_SALES_DAILY A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, B.PLACE, C.NAME");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+				c.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.list.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_TOTAL");
+			}
+
+			this.data.put("CNT_CARD", cnt[0]);
+			this.data.put("CNT_CASH", cnt[1]);
+			this.data.put("CNT_PREPAY", cnt[2]);
+			this.data.put("CNT_TOTAL", cnt[3]);
+			this.data.put("AMOUNT_CARD", amt[0]);
+			this.data.put("AMOUNT_CASH", amt[1]);
+			this.data.put("AMOUNT_PREPAY", amt[2]);
+			this.data.put("AMOUNT_TOTAL", amt[3]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 조직명
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 상품별 매출 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @param goods 상품
+ * @return string
+ *
+ */
+	public String goods(String sType, long company, long organ, long place, String sDate, String eDate, String goods) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMMDD BETWEEN '" + sDate + "' AND '" + eDate + "'";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+		if (!StringEx.isEmpty(goods)) { // 상품
+			WHERE += " AND D.NAME LIKE '%" + goods + "%'";
+		}
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			long[] cnt = {0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C D) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, A.GOODS_SEQ, B.PLACE, C.NAME AS ORGAN, D.NAME AS GOODS"
+				+ " FROM TB_SALES_DAILY A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ INNER JOIN TB_GOODS D ON A.GOODS_SEQ = D.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY A.VM_PLACE_SEQ, A.COMPANY_SEQ, A.ORGANIZATION_SEQ, A.GOODS_SEQ, B.PLACE, C.NAME, D.NAME");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+				c.put("COMPANY_SEQ", rs.getLong("COMPANY_SEQ"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("GOODS_SEQ", rs.getLong("GOODS_SEQ"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+				c.put("GOODS", rs.getString("GOODS"));
+
+				this.list.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_TOTAL");
+			}
+
+			this.data.put("CNT_CARD", cnt[0]);
+			this.data.put("CNT_CASH", cnt[1]);
+			this.data.put("CNT_PREPAY", cnt[2]);
+			this.data.put("CNT_TOTAL", cnt[3]);
+			this.data.put("AMOUNT_CARD", amt[0]);
+			this.data.put("AMOUNT_CASH", amt[1]);
+			this.data.put("AMOUNT_PREPAY", amt[2]);
+			this.data.put("AMOUNT_TOTAL", amt[3]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 조직명
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 상세 매출 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @param goods 상품
+ * @param payment 결제 방식
+ * @param step 진행 상태
+ * @return string
+ *
+ */
+	public String sales(String sType, long company, long organ, long place, String sDate, String eDate, long goods, String payment, String step) throws Exception {
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TRANSACTION_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+		String TABLE = "TB_SALES A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ INNER JOIN TB_GOODS D ON A.GOODS_SEQ = D.SEQ LEFT JOIN TB_CODE E ON (A.PAY_TYPE = E.CODE AND E.TYPE = 'PAY_TYPE') LEFT JOIN TB_CODE F ON (A.PAY_STEP = F.CODE AND F.TYPE = 'PAY_STEP') LEFT JOIN TB_CODE G ON (A.INPUT_TYPE = G.CODE AND G.TYPE = 'INPUT_TYPE') LEFT JOIN TB_CODE H ON (A.PAY_CARD = H.CODE AND H.TYPE = 'PAY_CARD')";
+
+		switch (StringEx.str2int(sType)) {
+			case 2 : // 매입
+				WHERE = "A.PURCHASE_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+			case 3 : // 입금
+				WHERE = "A.PAY_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+			case 4 : // 마감
+				WHERE = "A.CLOSING_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+		}
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+		if (goods > 0) { // 상품
+			WHERE += " AND A.GOODS_SEQ = " + goods;
+		}
+
+		if (!StringEx.isEmpty(step)) { // 상태
+			WHERE += " AND A.PAY_STEP = '" + step + "'";
+		}
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C D E F G H) INDEX_DESC(A UK_SALES_2) */"
+				+ "  TO_CHAR(TO_DATE(A.TRANSACTION_DATE || A.TRANSACTION_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS') AS TRANSACTION_DATE"
+				+ ", TO_CHAR(TO_DATE(A.PURCHASE_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS PURCHASE_DATE"
+				+ ", TO_CHAR(TO_DATE(A.PAY_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS PAY_DATE"
+				+ ", TO_CHAR(TO_DATE(A.CLOSING_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS CLOSING_DATE"
+				+ ", TO_CHAR(TO_DATE(A.ORG_TRANS_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS ORG_TRANS_DATE"
+				+ ", A.AMOUNT, E.NAME AS PAY_TYPE, F.NAME AS PAY_STEP, G.NAME AS INPUT_TYPE, H.NAME AS PAY_CARD, B.PLACE, C.NAME AS ORGAN, D.NAME AS GOODS"
+				+ " FROM " + TABLE
+				+ " WHERE " + WHERE);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("TRANSACTION_DATE", rs.getString("TRANSACTION_DATE"));
+				c.put("PURCHASE_DATE", rs.getString("PURCHASE_DATE"));
+				c.put("PAY_DATE", rs.getString("PAY_DATE"));
+				c.put("CLOSING_DATE", rs.getString("CLOSING_DATE"));
+				c.put("ORG_TRANS_DATE", rs.getString("ORG_TRANS_DATE"));
+				c.put("AMOUNT", rs.getLong("AMOUNT"));
+				c.put("PAY_TYPE", rs.getString("PAY_TYPE"));
+				c.put("PAY_STEP", rs.getString("PAY_STEP"));
+				c.put("INPUT_TYPE", rs.getString("INPUT_TYPE"));
+				c.put("PAY_CARD", rs.getString("PAY_CARD"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+				c.put("GOODS", rs.getString("GOODS"));
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 상세 매출 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @param goods 상품
+ * @param payment 결제 방식
+ * @param step 진행 상태
+ * @param pageNo 페이지
+ * @return string
+ *
+ */
+	public String sales(String sType, long company, long organ, long place, String sDate, String eDate, long goods, String payment, String step, int pageNo) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TRANSACTION_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+		String TABLE = "TB_SALES A INNER JOIN TB_VENDING_MACHINE_PLACE B ON A.VM_PLACE_SEQ = B.SEQ INNER JOIN TB_ORGANIZATION C ON A.ORGANIZATION_SEQ = C.SEQ INNER JOIN TB_GOODS D ON A.GOODS_SEQ = D.SEQ LEFT JOIN TB_CODE E ON (A.PAY_TYPE = E.CODE AND E.TYPE = 'PAY_TYPE') LEFT JOIN TB_CODE F ON (A.PAY_STEP = F.CODE AND F.TYPE = 'PAY_STEP') LEFT JOIN TB_CODE G ON (A.INPUT_TYPE = G.CODE AND G.TYPE = 'INPUT_TYPE') LEFT JOIN TB_CODE H ON (A.PAY_CARD = H.CODE AND H.TYPE = 'PAY_CARD')";
+
+		switch (StringEx.str2int(sType)) {
+			case 2 : // 매입
+				WHERE = "A.PURCHASE_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+			case 3 : // 입금
+				WHERE = "A.PAY_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+			case 4 : // 마감
+				WHERE = "A.CLOSING_DATE BETWEEN '" + sDate + "' AND '" + eDate + "'";
+				break;
+		}
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+		if (goods > 0) { // 상품
+			WHERE += " AND A.GOODS_SEQ = " + goods;
+		}
+
+		if (!StringEx.isEmpty(step)) { // 상태
+			WHERE += " AND A.PAY_STEP = '" + step + "'";
+		}
+
+	// 총 레코드수
+		this.records = StringEx.str2long(dbLib.getResult(conn, "SELECT /*+ ORDERED USE_NL(B C D E F G H) */ COUNT(*) FROM " + TABLE + " WHERE " + WHERE));
+
+	// 총 페이지수
+		this.pages = Pager.getSize(this.records, cfg.getInt("limit.list"));
+
+	// 리스트 가상번호
+		long no = this.records - (pageNo - 1) * cfg.getInt("limit.list");
+
+	// 목록 가져오기
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			int s = ((pageNo - 1) * cfg.getInt("limit.list")) + 1;
+			int e = (s - 1) + cfg.getInt("limit.list");
+
+			ps = conn.prepareStatement("SELECT S2.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT ROWNUM AS RNUM, S1.*"
+				+ " FROM"
+				+ " ("
+				+ " SELECT /*+ ORDERED USE_NL(B C D E F G H) INDEX_DESC(A UK_SALES_2) */ TO_CHAR(TO_DATE(A.TRANSACTION_DATE || A.TRANSACTION_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS') AS TRANSACTION_DATE, TO_CHAR(TO_DATE(A.PURCHASE_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS PURCHASE_DATE, TO_CHAR(TO_DATE(A.PAY_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS PAY_DATE, TO_CHAR(TO_DATE(A.CLOSING_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS CLOSING_DATE, TO_CHAR(TO_DATE(A.ORG_TRANS_DATE, 'YYYYMMDD'), 'YYYY-MM-DD') AS ORG_TRANS_DATE, A.AMOUNT, E.NAME AS PAY_TYPE, F.NAME AS PAY_STEP, G.NAME AS INPUT_TYPE, H.NAME AS PAY_CARD, B.PLACE, C.NAME AS ORGAN, D.NAME AS GOODS"
+				+ " FROM " + TABLE
+				+ " WHERE " + WHERE
+				+ " ) S1"
+				+ " WHERE ROWNUM <= " + e
+				+ " ) S2"
+				+ " WHERE RNUM >= " + s);
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("TRANSACTION_DATE", rs.getString("TRANSACTION_DATE"));
+				c.put("PURCHASE_DATE", rs.getString("PURCHASE_DATE"));
+				c.put("PAY_DATE", rs.getString("PAY_DATE"));
+				c.put("CLOSING_DATE", rs.getString("CLOSING_DATE"));
+				c.put("ORG_TRANS_DATE", rs.getString("ORG_TRANS_DATE"));
+				c.put("AMOUNT", rs.getLong("AMOUNT"));
+				c.put("PAY_TYPE", rs.getString("PAY_TYPE"));
+				c.put("PAY_STEP", rs.getString("PAY_STEP"));
+				c.put("INPUT_TYPE", rs.getString("INPUT_TYPE"));
+				c.put("PAY_CARD", rs.getString("PAY_CARD"));
+				c.put("PLACE", rs.getString("PLACE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+				c.put("GOODS", rs.getString("GOODS"));
+				c.put("NO", no--);
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 조직명
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return error;
+	}
+/**
+ * 매출 마감 현황
+ *
+ * @param sType 집계 유형
+ * @param company 소속
+ * @param organ 조직
+ * @param place 위치
+ * @param sDate 시작일
+ * @param eDate 종료일
+ * @param isAll 상품 마감 현황 포함 여부
+ * @return string
+ *
+ */
+	public String closing(String sType, long company, long organ, long place, String sDate, String eDate, boolean isAll) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (company == 0 || StringEx.isEmpty(sType) || StringEx.isEmpty(sDate) || StringEx.isEmpty(eDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMMDD BETWEEN '" + sDate + "' AND '" + eDate + "'";
+
+		if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자
+			WHERE += " AND A.USER_SEQ = " + this.cfg.get("user.seq");
+		} else {
+			if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+				WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+			}
+
+			if (this.cfg.getLong("user.organ") > 0) { // 조직이 지정된 경우, 내 하위 조직들만 검색
+				WHERE += " AND A.ORGANIZATION_SEQ IN ("
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + this.cfg.getLong("user.organ") + " CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + this.cfg.getLong("user.organ")
+				      +  " UNION"
+				      +  " SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ IN (SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq") + ") CONNECT BY PRIOR SEQ = PARENT_SEQ"
+				      +  " UNION"
+				      +  " SELECT ORGANIZATION_SEQ FROM TB_USER_APP_ORGAN WHERE SEQ = " + this.cfg.getLong("user.seq")
+				      +  " )";
+			}
+		}
+
+		if (company > 0) { // 소속
+			WHERE += " AND A.COMPANY_SEQ = " + company;
+		}
+
+		if (organ > 0) { // 조직
+			WHERE += " AND A.ORGANIZATION_SEQ IN (SELECT SEQ FROM TB_ORGANIZATION WHERE SORT = 1 START WITH PARENT_SEQ = " + organ + " CONNECT BY PRIOR SEQ = PARENT_SEQ UNION SELECT SEQ FROM TB_ORGANIZATION WHERE SEQ = " + organ + ")";
+		}
+
+		if (place > 0) { // 위치
+			WHERE += " AND A.VM_PLACE_SEQ = " + place;
+		}
+
+	// 상품별 마감 현황
+		if (isAll) {
+			this.goods = new ArrayList<GeneralConfig>();
+
+			try {
+				ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */ NVL(SUM(A.CNT), 0) AS CNT, A.ORGANIZATION_SEQ, A.VM_PLACE_SEQ, A.GOODS_SEQ, B.NAME"
+					+ " FROM TB_CLOSING_GOODS A INNER JOIN TB_GOODS B ON A.GOODS_SEQ = B.SEQ"
+					+ " WHERE " + WHERE
+					+ " GROUP BY A.ORGANIZATION_SEQ, A.VM_PLACE_SEQ, A.GOODS_SEQ, B.NAME");
+				rs = ps.executeQuery();
+
+				while (rs.next()) {
+					GeneralConfig c = new GeneralConfig();
+
+					c.put("CNT", rs.getLong("CNT"));
+					c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+					c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+					c.put("GOODS_SEQ", rs.getLong("GOODS_SEQ"));
+					c.put("NAME", rs.getString("NAME"));
+
+					this.goods.add(c);
+				}
+			} catch (Exception e) {
+				error = e.getMessage();
+			} finally {
+				try {
+					if (rs != null) {
+						rs.close();
+						rs = null;
+					}
+				} catch (Exception e_) {
+				}
+
+				try {
+					if (ps != null) {
+						ps.close();
+						ps = null;
+					}
+				} catch (Exception e_) {
+				}
+			}
+
+			if (!StringEx.isEmpty(error)) {
+				try {
+					if (conn != null) {
+						conn.close();
+						conn = null;
+					}
+				} catch (Exception e) {
+				}
+
+				return error;
+			}
+		}
+
+	// 자판기별 마감 현황
+		this.list = new ArrayList<GeneralConfig>();
+		this.data = new GeneralConfig();
+
+		try {
+			long[] cnt = {0, 0, 0, 0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0, 0, 0, 0};
+			long[] cms = {0, 0, 0, 0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B C) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.COMMISSION END), 0) AS COMMISSION_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.COMMISSION END), 0) AS COMMISSION_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.CNT END), 0) AS CNT_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.CNT END), 0) AS CNT_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", NVL(SUM(A.COMMISSION), 0) AS COMMISSION_TOTAL"
+				+ ", NVL(MIN(TO_CHAR(TO_DATE(A.START_DATE || A.START_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS')), '-') AS START_DATE"
+				+ ", NVL(MAX(TO_CHAR(TO_DATE(A.END_DATE || A.END_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS')), '-') AS END_DATE"
+				+ ", A.ORGANIZATION_SEQ, A.VM_PLACE_SEQ, B.NAME AS ORGAN, C.PLACE"
+				+ " FROM TB_CLOSING A INNER JOIN TB_ORGANIZATION B ON A.ORGANIZATION_SEQ = B.SEQ INNER JOIN TB_VENDING_MACHINE_PLACE C ON A.VM_PLACE_SEQ = C.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY A.ORGANIZATION_SEQ, A.VM_PLACE_SEQ, B.PARENT_SEQ, B.NAME, C.PLACE"
+				+ " ORDER BY B.PARENT_SEQ, A.ORGANIZATION_SEQ, A.VM_PLACE_SEQ");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("COMMISSION_CARD", rs.getLong("COMMISSION_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("COMMISSION_CASH", rs.getLong("COMMISSION_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("COMMISSION_PREPAY", rs.getLong("COMMISSION_PREPAY"));
+				c.put("CNT_PREPAY_TMN", rs.getLong("CNT_PREPAY_TMN"));
+				c.put("AMOUNT_PREPAY_TMN", rs.getLong("AMOUNT_PREPAY_TMN"));
+				c.put("COMMISSION_PREPAY_TMN", rs.getLong("COMMISSION_PREPAY_TMN"));
+				c.put("CNT_PREPAY_MYB", rs.getLong("CNT_PREPAY_MYB"));
+				c.put("AMOUNT_PREPAY_MYB", rs.getLong("AMOUNT_PREPAY_MYB"));
+				c.put("COMMISSION_PREPAY_MYB", rs.getLong("COMMISSION_PREPAY_MYB"));
+				c.put("CNT_PREPAY_ETC", rs.getLong("CNT_PREPAY") - rs.getLong("CNT_PREPAY_TMN") - rs.getLong("CNT_PREPAY_MYB"));
+				c.put("AMOUNT_PREPAY_ETC", rs.getLong("AMOUNT_PREPAY") - rs.getLong("AMOUNT_PREPAY_TMN") - rs.getLong("AMOUNT_PREPAY_MYB"));
+				c.put("COMMISSION_PREPAY_ETC", rs.getLong("COMMISSION_PREPAY") - rs.getLong("COMMISSION_PREPAY_TMN") - rs.getLong("COMMISSION_PREPAY_MYB"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("COMMISSION_TOTAL", rs.getLong("COMMISSION_TOTAL"));
+				c.put("START_DATE", rs.getString("START_DATE"));
+				c.put("END_DATE", rs.getString("END_DATE"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("VM_PLACE_SEQ", rs.getLong("VM_PLACE_SEQ"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+				c.put("PLACE", rs.getString("PLACE"));
+
+				if (isAll) { // 상품 마감 현황
+					for (int i = 0; i < this.goods.size(); i++) {
+						GeneralConfig s = (GeneralConfig) this.goods.get(i);
+
+						if (rs.getLong("ORGANIZATION_SEQ") == s.getLong("ORGANIZATION_SEQ") && rs.getLong("VM_PLACE_SEQ") == s.getLong("VM_PLACE_SEQ")) {
+							c.put("GOODS_" + s.getLong("GOODS_SEQ"), s.getLong("CNT"));
+
+							this.data.put("PLACE_GOODS_" + s.getLong("GOODS_SEQ"), StringEx.str2long(this.data.get("PLACE_GOODS_" + s.getLong("GOODS_SEQ")), 0) + s.getLong("CNT"));
+						}
+					}
+				}
+
+				this.list.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_PREPAY_TMN");
+				cnt[4] += rs.getLong("CNT_PREPAY_MYB");
+				cnt[5] += rs.getLong("CNT_PREPAY") - rs.getLong("CNT_PREPAY_TMN") - rs.getLong("CNT_PREPAY_MYB");
+				cnt[6] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_PREPAY_TMN");
+				amt[4] += rs.getLong("AMOUNT_PREPAY_MYB");
+				amt[5] += rs.getLong("AMOUNT_PREPAY") - rs.getLong("AMOUNT_PREPAY_TMN") - rs.getLong("AMOUNT_PREPAY_MYB");
+				amt[6] += rs.getLong("AMOUNT_TOTAL");
+				cms[0] += rs.getLong("COMMISSION_CARD");
+				cms[1] += rs.getLong("COMMISSION_CASH");
+				cms[2] += rs.getLong("COMMISSION_PREPAY");
+				cms[3] += rs.getLong("COMMISSION_PREPAY_TMN");
+				cms[4] += rs.getLong("COMMISSION_PREPAY_MYB");
+				cms[5] += rs.getLong("COMMISSION_PREPAY") - rs.getLong("COMMISSION_PREPAY_TMN") - rs.getLong("COMMISSION_PREPAY_MYB");
+				cms[6] += rs.getLong("COMMISSION_TOTAL");
+			}
+
+			this.data.put("PLACE_CNT_CARD", cnt[0]);
+			this.data.put("PLACE_CNT_CASH", cnt[1]);
+			this.data.put("PLACE_CNT_PREPAY", cnt[2]);
+			this.data.put("PLACE_CNT_PREPAY_TMN", cnt[3]);
+			this.data.put("PLACE_CNT_PREPAY_MYB", cnt[4]);
+			this.data.put("PLACE_CNT_PREPAY_ETC", cnt[5]);
+			this.data.put("PLACE_CNT_TOTAL", cnt[6]);
+			this.data.put("PLACE_AMOUNT_CARD", amt[0]);
+			this.data.put("PLACE_AMOUNT_CASH", amt[1]);
+			this.data.put("PLACE_AMOUNT_PREPAY", amt[2]);
+			this.data.put("PLACE_AMOUNT_PREPAY_TMN", amt[3]);
+			this.data.put("PLACE_AMOUNT_PREPAY_MYB", amt[4]);
+			this.data.put("PLACE_AMOUNT_PREPAY_ETC", amt[5]);
+			this.data.put("PLACE_AMOUNT_TOTAL", amt[6]);
+			this.data.put("PLACE_COMMISSION_CARD", cms[0]);
+			this.data.put("PLACE_COMMISSION_CASH", cms[1]);
+			this.data.put("PLACE_COMMISSION_PREPAY", cms[2]);
+			this.data.put("PLACE_COMMISSION_PREPAY_TMN", cms[3]);
+			this.data.put("PLACE_COMMISSION_PREPAY_MYB", cms[4]);
+			this.data.put("PLACE_COMMISSION_PREPAY_ETC", cms[5]);
+			this.data.put("PLACE_COMMISSION_TOTAL", cms[6]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 최하위 조직 타이틀
+		this.data.put("ORGAN", dbLib.getResult(conn, "SELECT NAME FROM (SELECT NAME FROM TB_ORGANIZATION WHERE COMPANY_SEQ = " + company + " AND SORT = 0 ORDER BY DEPTH DESC) WHERE ROWNUM = 1"));
+
+	// 거래처별 마감 현황
+		this.organ = new ArrayList<GeneralConfig>();
+
+		try {
+			long[] cnt = {0, 0, 0, 0, 0, 0, 0};
+			long[] amt = {0, 0, 0, 0, 0, 0, 0};
+			long[] cms = {0, 0, 0, 0, 0, 0, 0};
+
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */"
+				+ "  NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.CNT END), 0) AS CNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.AMOUNT END), 0) AS AMOUNT_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '01' THEN A.COMMISSION END), 0) AS COMMISSION_CARD"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.CNT END), 0) AS CNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.AMOUNT END), 0) AS AMOUNT_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '10' THEN A.COMMISSION END), 0) AS COMMISSION_CASH"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.CNT END), 0) AS CNT_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'TMN' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY_TMN"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.CNT END), 0) AS CNT_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' AND A.PAY_CARD = 'MYB' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY_MYB"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.CNT END), 0) AS CNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.AMOUNT END), 0) AS AMOUNT_PREPAY"
+				+ ", NVL(SUM(CASE WHEN A.PAY_TYPE = '11' THEN A.COMMISSION END), 0) AS COMMISSION_PREPAY"
+				+ ", NVL(SUM(A.CNT), 0) AS CNT_TOTAL"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT_TOTAL"
+				+ ", NVL(SUM(A.COMMISSION), 0) AS COMMISSION_TOTAL"
+				+ ", NVL(MIN(TO_CHAR(TO_DATE(A.START_DATE || A.START_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS')), '-') AS START_DATE"
+				+ ", NVL(MAX(TO_CHAR(TO_DATE(A.END_DATE || A.END_TIME, 'YYYYMMDDHH24MISS'), 'YYYY-MM-DD HH24:MI:SS')), '-') AS END_DATE"
+				+ ", B.SEQ, B.NAME"
+				+ " FROM TB_CLOSING A INNER JOIN TB_ORGANIZATION B ON A.ORGANIZATION_SEQ = B.SEQ"
+				+ " WHERE " + WHERE
+				+ " GROUP BY B.SEQ, B.PARENT_SEQ, B.NAME"
+				+ " ORDER BY B.PARENT_SEQ, B.SEQ");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT_CARD", rs.getLong("CNT_CARD"));
+				c.put("AMOUNT_CARD", rs.getLong("AMOUNT_CARD"));
+				c.put("COMMISSION_CARD", rs.getLong("COMMISSION_CARD"));
+				c.put("CNT_CASH", rs.getLong("CNT_CASH"));
+				c.put("AMOUNT_CASH", rs.getLong("AMOUNT_CASH"));
+				c.put("COMMISSION_CASH", rs.getLong("COMMISSION_CASH"));
+				c.put("CNT_PREPAY", rs.getLong("CNT_PREPAY"));
+				c.put("AMOUNT_PREPAY", rs.getLong("AMOUNT_PREPAY"));
+				c.put("COMMISSION_PREPAY", rs.getLong("COMMISSION_PREPAY"));
+				c.put("CNT_PREPAY_TMN", rs.getLong("CNT_PREPAY_TMN"));
+				c.put("AMOUNT_PREPAY_TMN", rs.getLong("AMOUNT_PREPAY_TMN"));
+				c.put("COMMISSION_PREPAY_TMN", rs.getLong("COMMISSION_PREPAY_TMN"));
+				c.put("CNT_PREPAY_MYB", rs.getLong("CNT_PREPAY_MYB"));
+				c.put("AMOUNT_PREPAY_MYB", rs.getLong("AMOUNT_PREPAY_MYB"));
+				c.put("COMMISSION_PREPAY_MYB", rs.getLong("COMMISSION_PREPAY_MYB"));
+				c.put("CNT_PREPAY_ETC", rs.getLong("CNT_PREPAY") - rs.getLong("CNT_PREPAY_TMN") - rs.getLong("CNT_PREPAY_MYB"));
+				c.put("AMOUNT_PREPAY_ETC", rs.getLong("AMOUNT_PREPAY") - rs.getLong("AMOUNT_PREPAY_TMN") - rs.getLong("AMOUNT_PREPAY_MYB"));
+				c.put("COMMISSION_PREPAY_ETC", rs.getLong("COMMISSION_PREPAY") - rs.getLong("COMMISSION_PREPAY_TMN") - rs.getLong("COMMISSION_PREPAY_MYB"));
+				c.put("CNT_TOTAL", rs.getLong("CNT_TOTAL"));
+				c.put("AMOUNT_TOTAL", rs.getLong("AMOUNT_TOTAL"));
+				c.put("COMMISSION_TOTAL", rs.getLong("COMMISSION_TOTAL"));
+				c.put("START_DATE", rs.getString("START_DATE"));
+				c.put("END_DATE", rs.getString("END_DATE"));
+				c.put("SEQ", rs.getLong("SEQ"));
+				c.put("NAME", rs.getString("NAME"));
+
+				if (isAll) { // 상품 마감 현황
+					for (int i = 0; i < this.goods.size(); i++) {
+						GeneralConfig s = (GeneralConfig) this.goods.get(i);
+
+						if (rs.getLong("SEQ") == s.getLong("ORGANIZATION_SEQ")) {
+							c.put("GOODS_" + s.getLong("GOODS_SEQ"), s.getLong("CNT"));
+
+							this.data.put("ORGAN_GOODS_" + s.getLong("GOODS_SEQ"), StringEx.str2long(this.data.get("ORGAN_GOODS_" + s.getLong("GOODS_SEQ")), 0) + s.getLong("CNT"));
+						}
+					}
+				}
+
+				this.organ.add(c);
+
+				cnt[0] += rs.getLong("CNT_CARD");
+				cnt[1] += rs.getLong("CNT_CASH");
+				cnt[2] += rs.getLong("CNT_PREPAY");
+				cnt[3] += rs.getLong("CNT_PREPAY_TMN");
+				cnt[4] += rs.getLong("CNT_PREPAY_MYB");
+				cnt[5] += rs.getLong("CNT_PREPAY") - rs.getLong("CNT_PREPAY_TMN") - rs.getLong("CNT_PREPAY_MYB");
+				cnt[6] += rs.getLong("CNT_TOTAL");
+				amt[0] += rs.getLong("AMOUNT_CARD");
+				amt[1] += rs.getLong("AMOUNT_CASH");
+				amt[2] += rs.getLong("AMOUNT_PREPAY");
+				amt[3] += rs.getLong("AMOUNT_PREPAY_TMN");
+				amt[4] += rs.getLong("AMOUNT_PREPAY_MYB");
+				amt[5] += rs.getLong("AMOUNT_PREPAY") - rs.getLong("AMOUNT_PREPAY_TMN") - rs.getLong("AMOUNT_PREPAY_MYB");
+				amt[6] += rs.getLong("AMOUNT_TOTAL");
+				cms[0] += rs.getLong("COMMISSION_CARD");
+				cms[1] += rs.getLong("COMMISSION_CASH");
+				cms[2] += rs.getLong("COMMISSION_PREPAY");
+				cms[3] += rs.getLong("COMMISSION_PREPAY_TMN");
+				cms[4] += rs.getLong("COMMISSION_PREPAY_MYB");
+				cms[5] += rs.getLong("COMMISSION_PREPAY") - rs.getLong("COMMISSION_PREPAY_TMN") - rs.getLong("COMMISSION_PREPAY_MYB");
+				cms[6] += rs.getLong("COMMISSION_TOTAL");
+			}
+
+			this.data.put("ORGAN_CNT_CARD", cnt[0]);
+			this.data.put("ORGAN_CNT_CASH", cnt[1]);
+			this.data.put("ORGAN_CNT_PREPAY", cnt[2]);
+			this.data.put("ORGAN_CNT_PREPAY_TMN", cnt[3]);
+			this.data.put("ORGAN_CNT_PREPAY_MYB", cnt[4]);
+			this.data.put("ORGAN_CNT_PREPAY_ETC", cnt[5]);
+			this.data.put("ORGAN_CNT_TOTAL", cnt[6]);
+			this.data.put("ORGAN_AMOUNT_CARD", amt[0]);
+			this.data.put("ORGAN_AMOUNT_CASH", amt[1]);
+			this.data.put("ORGAN_AMOUNT_PREPAY", amt[2]);
+			this.data.put("ORGAN_AMOUNT_PREPAY_TMN", amt[3]);
+			this.data.put("ORGAN_AMOUNT_PREPAY_MYB", amt[4]);
+			this.data.put("ORGAN_AMOUNT_PREPAY_ETC", amt[5]);
+			this.data.put("ORGAN_AMOUNT_TOTAL", amt[6]);
+			this.data.put("ORGAN_COMMISSION_CARD", cms[0]);
+			this.data.put("ORGAN_COMMISSION_CASH", cms[1]);
+			this.data.put("ORGAN_COMMISSION_PREPAY", cms[2]);
+			this.data.put("ORGAN_COMMISSION_PREPAY_TMN", cms[3]);
+			this.data.put("ORGAN_COMMISSION_PREPAY_MYB", cms[4]);
+			this.data.put("ORGAN_COMMISSION_PREPAY_ETC", cms[5]);
+			this.data.put("ORGAN_COMMISSION_TOTAL", cms[6]);
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return null;
+	}
+/**
+ * 월 정산 리포트
+ *
+ * @param sType 정산 유형
+ * @param sDate 날짜
+ * @return string
+ *
+ */
+	public String account(String sType, String sDate) throws Exception {
+	// 필수 검색 조건이 없을 때
+		if (StringEx.isEmpty(sType) || StringEx.isEmpty(sDate)) {
+			return null;
+		}
+
+	// 실행에 사용될 변수
+		DBLibrary dbLib = new DBLibrary();
+		Connection conn = null;
+		PreparedStatement ps = null;
+		ResultSet rs = null;
+		String error = null;
+
+	// DB 연결
+		conn = dbLib.getConnection(this.cfg.get("db.jdbc.name"), this.cfg.get("db.jdbc.host"), this.cfg.get("db.jdbc.user"), this.cfg.get("db.jdbc.pass"));
+
+		if (conn == null) {
+			return "DB 연결에 실패하였습니다.";
+		}
+
+	// 검색절 생성
+		String WHERE = "A.TYPE = '" + sType + "' AND A.YYYYMM = '" + sDate + "'";
+
+		if (this.cfg.getLong("user.company") > 0) { // 시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+			WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
+		}
+
+	// 선불 카드사
+		this.company = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */ B.CODE, B.NAME FROM TB_SALES_MONTHLY A INNER JOIN TB_CODE B ON (A.PAY_CARD = B.CODE AND B.TYPE = 'PAY_CARD') WHERE " + WHERE + " AND A.PAY_TYPE IN ('11') GROUP BY B.CODE, B.NAME");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CODE", rs.getString("CODE"));
+				c.put("NAME", rs.getString("NAME"));
+
+				this.company.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 선불
+		this.prepay = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */"
+				+ "  NVL(SUM(A.CNT), 0) AS CNT"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT"
+				+ ", NVL(SUM(A.COMMISSION), 0) AS COMMISSION"
+				+ ", A.ORGANIZATION_SEQ, A.PAY_CARD, B.NAME AS ORGAN"
+				+ " FROM TB_SALES_MONTHLY A INNER JOIN TB_ORGANIZATION B ON A.ORGANIZATION_SEQ = B.SEQ"
+				+ " WHERE " + WHERE + " AND A.PAY_TYPE IN ('11')"
+				+ " GROUP BY A.ORGANIZATION_SEQ, A.PAY_CARD, B.PARENT_SEQ, B.NAME"
+				+ " ORDER BY B.PARENT_SEQ, A.ORGANIZATION_SEQ");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT", rs.getLong("CNT"));
+				c.put("AMOUNT", rs.getLong("AMOUNT"));
+				c.put("COMMISSION", rs.getLong("COMMISSION"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("PAY_CARD", rs.getString("PAY_CARD"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.prepay.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 카드 (선불 + 신용)
+		this.card = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */"
+				+ "  NVL(SUM(A.CNT), 0) AS CNT"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT"
+				+ ", NVL(SUM(A.COMMISSION), 0) AS COMMISSION"
+				+ ", A.ORGANIZATION_SEQ, B.NAME AS ORGAN"
+				+ " FROM TB_SALES_MONTHLY A INNER JOIN TB_ORGANIZATION B ON A.ORGANIZATION_SEQ = B.SEQ"
+				+ " WHERE " + WHERE + " AND A.PAY_TYPE IN ('01', '11')"
+				+ " GROUP BY A.ORGANIZATION_SEQ, B.PARENT_SEQ, B.NAME"
+				+ " ORDER BY B.PARENT_SEQ, A.ORGANIZATION_SEQ");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT", rs.getLong("CNT"));
+				c.put("AMOUNT", rs.getLong("AMOUNT"));
+				c.put("COMMISSION", rs.getLong("COMMISSION"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.card.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 전체
+		this.list = new ArrayList<GeneralConfig>();
+
+		try {
+			ps = conn.prepareStatement("SELECT /*+ ORDERED USE_NL(B) */"
+				+ "  NVL(SUM(A.CNT), 0) AS CNT"
+				+ ", NVL(SUM(A.AMOUNT), 0) AS AMOUNT"
+				+ ", NVL(SUM(A.COMMISSION), 0) AS COMMISSION"
+				+ ", A.ORGANIZATION_SEQ, A.PAY_TYPE, B.NAME AS ORGAN"
+				+ " FROM TB_SALES_MONTHLY A INNER JOIN TB_ORGANIZATION B ON A.ORGANIZATION_SEQ = B.SEQ"
+				+ " WHERE " + WHERE + " AND A.PAY_TYPE IN ('01', '11')"
+				+ " GROUP BY A.ORGANIZATION_SEQ, A.PAY_TYPE, B.PARENT_SEQ, B.NAME"
+				+ " ORDER BY B.PARENT_SEQ, A.ORGANIZATION_SEQ");
+			rs = ps.executeQuery();
+
+			while (rs.next()) {
+				GeneralConfig c = new GeneralConfig();
+
+				c.put("CNT", rs.getLong("CNT"));
+				c.put("AMOUNT", rs.getLong("AMOUNT"));
+				c.put("COMMISSION", rs.getLong("COMMISSION"));
+				c.put("ORGANIZATION_SEQ", rs.getLong("ORGANIZATION_SEQ"));
+				c.put("PAY_TYPE", rs.getString("PAY_TYPE"));
+				c.put("ORGAN", rs.getString("ORGAN"));
+
+				this.list.add(c);
+			}
+		} catch (Exception e) {
+			error = e.getMessage();
+		} finally {
+			try {
+				if (rs != null) {
+					rs.close();
+					rs = null;
+				}
+			} catch (Exception e_) {
+			}
+
+			try {
+				if (ps != null) {
+					ps.close();
+					ps = null;
+				}
+			} catch (Exception e_) {
+			}
+		}
+
+	// 에러 처리
+		if (!StringEx.isEmpty(error)) {
+			try {
+				if (conn != null) {
+					conn.close();
+					conn = null;
+				}
+			} catch (Exception e) {
+			}
+
+			return error;
+		}
+
+	// 리소스 반환
+		try {
+			if (conn != null) {
+				conn.close();
+				conn = null;
+			}
+		} catch (Exception e) {
+		}
+
+		return null;
+	}
+}

@@ -1,0 +1,123 @@
+@charset "utf-8";
+/* ####### VMMS CSS Document ####### */
+
+html, * {margin:0; padding:0; font-family:"돋움", Dotum, "굴림", Gulim, Arial, Sans-serif; font-size:13px; color:#5f5f5f; vertical-align:top;}
+html {overflow-y: scroll;}
+body {margin:0 auto; vertical-align:top;}
+img, fieldset, button {border: 0 none; vertical-align: middle;}
+div, ul, li, h, p {list-style:none;}
+
+input {color:#666666; vertical-align:middle;}
+
+html, body, address, blockquote, div, dl, form, h1, h2, h3, h4, h5, h6, ol, p, pre, table, ul,
+dd, dt, li, tbody, td, tfoot, th, thead, tr, button, del, ins, map, object,
+a, abbr, acronym, b, bdo, big, br, cite, code, dfn, em, i, img, kbd, q, samp, small, span,
+strong, sub, sup, tt, var, legend, fieldset { margin: 0; padding: 0; }
+body, select, input, textarea {font: 100%/1.2 "Dotum", sans-serif; }
+a {text-decoration: none;}
+
+
+
+
+body {
+	width: 100%;
+	background: url('../web/login/img_bg.gif') 0 0 repeat-x;
+}
+div#wrap {
+	width: 100%;
+}
+div#login {
+	width: 591px;
+	margin: 0 auto;
+	text-align: left;
+	position: relative;
+	padding-top: 200px;
+}
+div#loginBox {
+	width: 591px;
+	height: 257px;
+	background: url('../web/login/img_loginBox_bg.gif') 0 0 no-repeat;
+	position: relative;
+	margin: 8px 0 12px 0;
+}
+div#loginBox .loginForm {
+	position: absolute;
+	left: 312px;
+	padding-top: 150px;
+	
+}
+div#loginBox .loginForm p {
+	float: left;
+	margin-right: 5px;
+}
+div#loginBox .loginForm p img {
+	margin-right: 12px;
+}
+div#loginBox .notice {
+	position: absolute;
+	top: 127px;
+	left: 348px;
+}
+div#loginBox .notice dl {
+	width: 294px;
+	border-bottom: 1px solid #e1e1e1;
+}
+div#loginBox .notice dt {
+	margin-bottom: 9px;
+}
+div#loginBox .notice dd {
+	padding: 0 11px;
+}
+div#loginBox .notice li {
+	width: 272px;
+	position: relative;
+	padding: 3px 0;
+	_padding: 4px 0;
+}
+div#loginBox .notice li a {
+	font-size: 11px;
+	display: inline-block;
+	color: #656565;
+	background: url(../web/login/icon_square.gif) 0 3px no-repeat;
+	padding-left: 7px;
+}
+div#loginBox .notice li a:hover {
+	color: #397cc8;
+}
+div#loginBox .notice li span {
+	position: absolute;
+	right: 0;
+	top: 2px;
+}
+div#login #copyright {
+	position:  relative;
+}
+div#login #copyright p {
+	position: absolute;
+	left: 0;
+	top: 3px;
+}
+div#login #copyright address {
+	position: absolute;
+	right: 0;
+}
+.btnLogin {
+	width: 71px;
+	height: 46px;
+	background: url(../web/login/btn_login.gif) 0 0 no-repeat;
+	border: none;
+	cursor: pointer;
+}	
+
+
+
+.ipt {
+	width: 120px;
+	height: 18px;
+	border: 1px solid #cccccc;
+	padding-left: 4px;
+	color: #999999;
+}
+.mb3 {
+	margin-bottom: 3px;
+}
