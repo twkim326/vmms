@@ -5712,6 +5712,9 @@ public class Sales {
 			}
 			
 		} else { //시스템 관리자가 아닌 경우, 내가 속한 소속만 검색
+			if (this.cfg.get("user.operator").equals("Y")) { // 자판기 운영자 20211018 scheo 다른조직 검색이 가능하여 수정
+				WHERE += " AND USER_SEQ = " + this.cfg.getLong("user.seq");
+			} 
 			WHERE += " AND A.COMPANY_SEQ = " + this.cfg.getLong("user.company");
 			
 			//organ = (organ <=0 ? this.cfg.getLong("user.organ") : this.cfg.getInt("user.organ.depth")>0 ? this.cfg.getLong("user.organ") : organ);
