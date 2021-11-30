@@ -25,7 +25,7 @@
 
 // 설정
 	GlobalConfig cfg = new GlobalConfig(request, response, session, "0202");
-
+	long user_comp = cfg.getLong("user.company");
 // 로그인을 하지 않았을 경우
 	if (!cfg.isLogin()) {
 		out.print(cfg.login());
@@ -43,6 +43,7 @@
 
 // 전송된 데이터
 	long seq = StringEx.str2long(request.getParameter("seq"), 0);
+	int type = StringEx.str2int(request.getParameter("Regitype"));
 
 // URL에 더해질 파라미터
 	String addParam = Param.addParam(request, "page:company:organ:sField:sQuery");
@@ -74,8 +75,7 @@
 		String strReflectFlag = StringEx.charset(request.getParameter("reflectflag"));
 		String aspCharge = StringEx.charset(request.getParameter("aspCharge"));
 		String placeMove = StringEx.charset(request.getParameter("placeMove"));
-
-		int type = StringEx.str2int(request.getParameter("Regitype"));
+		String memo = StringEx.charset(request.getParameter("memo"));
 
 		// 출입단말기 상태에 대한 상태값 추가.(2020.12.23 By Chae)
 		String accessStatus = StringEx.charset(request.getParameter("accessStatus"));
@@ -95,7 +95,9 @@
 			//error = objVM.regist(request, seq, company, organ, user, code, terminal, model, place, modem, sgcnt, strReflectFlag, aspCharge, placeMove);
 			//error = objVM.regist(request, seq, company, organ, user, code, terminal, model, place, place_code, place_no, modem, sgcnt, strReflectFlag, aspCharge, placeMove, type);
 			// 출입단말 상태 추가.(2020.12.23 By Chae)
-			error = objVM.regist(request, seq, company, organ, user, code, terminal, model, place, place_code, place_no, modem, sgcnt, strReflectFlag, aspCharge, placeMove, type, accessStatus);
+			//error = objVM.regist(request, seq, company, organ, user, code, terminal, model, place, place_code, place_no, modem, sgcnt, strReflectFlag, aspCharge, placeMove, type, accessStatus);
+			// 메모 추가.(2021.11.11 By scheo)
+			error = objVM.regist(request, seq, company, organ, user, code, terminal, model, place, place_code, place_no, modem, sgcnt, strReflectFlag, aspCharge, placeMove, type, accessStatus, memo);
 		} catch (Exception e) {
 			error = e.getMessage();
 		}
@@ -329,8 +331,8 @@
 	</tr>
 	<!-- 비가동 상태 여부 체크 하는 로직 추가.-->
 	<tr>
-		<th <% if (objVM.error.size() == 0) { %> class="last"<% } %>><span>비가동 여부</span></th>
-		<td <% if (objVM.error.size() == 0) { %> class="last"<% } %>>
+		<th <% if (objVM.error.size() == 0 && user_comp != 0) { %> class="last"<% } %>><span>비가동 여부</span></th>
+		<td colspan="3" <% if (objVM.error.size() == 0 && user_comp != 0) { %> class="last"<% } %>>
 			<span>
 				<select name="accessStatus" id="accessStatus" class="checkForm">
 					<option value="O" <% if("O".equals(objVM.data.get("ACCESS_STATUS"))){ %> selected <%}%> >-상태</option>
@@ -339,8 +341,16 @@
 				</select>
 			</span>
 		</td>
-		<th class="last"><span></span></th>
+		<!-- <th class="last"><span></span></th>
 		<td class="last">
+		</td> -->
+	</tr>
+	<%-- scheo 20211110 memo 추가 --%>
+	<tr <% if( user_comp == 0 && type != 0 ) { %> <% } else { %>style = "display:none" <% } %>>
+		<th <% if (objVM.error.size() == 0) { %> class="last"<% } %>><span>메모</span></th>
+		<td colspan="3" <% if (objVM.error.size() == 0) { %> class="last"<% } %>>
+			<input type="text" name="memo" id="memo" value="<%=Html.getText(objVM.data.get("MEMO"))%>" class="checkForm txtInput" style="width:1000px" maxlength="100"/>
+
 		</td>
 	</tr>
 <% if (objVM.error.size() > 0) { %>

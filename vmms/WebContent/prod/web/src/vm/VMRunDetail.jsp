@@ -179,6 +179,13 @@
 %>
 		</td>
 	</tr>
+	<%-- scheo 20211110 memo 추가 --%>
+	<tr <% if( user_id == 0) { %> <% } else { %>style = "display:none" <% } %>>
+		<th><span>메모</span></th>
+		<td colspan="3">
+			<%=Html.getText(objVM.data2.get(0).get("MEMO"))%>
+		</td>
+	</tr>
 	<tr>
 		<th class="last"><span>판매 이상</span></th>
 		<td class="last" colspan="3">

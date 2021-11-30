@@ -74,7 +74,6 @@
 	} catch (Exception e) {
 		error = e.getMessage();
 	}
-
 // 에러 처리
 	if (error != null) {
 		out.print(error);
@@ -132,6 +131,15 @@
 		sheet.setColumnView(11, 50);
 		sheet.setColumnView(12, 50);
 		/* 20180621 품절상세 정보 종료 허승찬 */
+		/* 20211115 scheo MEMO 추가*/
+		// 2021. 8. 17 채종욱 사업자 정보 조건 추가.
+		
+		if(cfg.getLong("user.company") == 0) {
+			sheet.setColumnView(13, 20);
+			sheet.setColumnView(14, 10);
+			sheet.setColumnView(15, 40);
+			sheet.setColumnView(16, 100);
+		}
 
 		sheet.addCell(new Label(0, 0, "페이지명", format1));
 		sheet.addCell(new Label(1, 0, "가동상태 조회", format1));
@@ -153,7 +161,13 @@
 		sheet.addCell(new Label(11, row + 0, "주제어부상세", format1));
 		sheet.addCell(new Label(12, row + 0, "P/D상세", format1));
 		/* 20180621 품절상세 정보 종료 허승찬 */
-
+		// 2021. 8. 17 채종욱 사업자 정보 조건 추가.
+		if(cfg.getLong("user.company") == 0){
+			sheet.addCell(new Label(13, row + 0, "사업자번호", format1));
+			sheet.addCell(new Label(14, row + 0, "BIZTYPE", format1));
+			sheet.addCell(new Label(15, row + 0, "상호명", format1));
+			sheet.addCell(new Label(16, row + 0, "메모", format1));
+		};
 		for (int i = 0; i < objVM.list.size(); i++) {
 			GeneralConfig c = (GeneralConfig) objVM.list.get(i);
 			/* if(c.get("IS_SOLD_OUT").equals("Y")){
@@ -177,6 +191,15 @@
 			sheet.addCell(new Label(11, i + row + 1, c.get("CONTROL_ERROR"), format1));
 			sheet.addCell(new Label(12, i + row + 1, c.get("PD_ERROR"), format1));
 			/* 20180621 품절상세 정보 종료 허승찬 */
+			// 2021. 8. 17 채종욱 사업자 정보 조건 추가.
+			// 2021. 11. 30 scheo 메모추가
+			if(cfg.getLong("user.company") == 0){
+				sheet.addCell(new Label(13, i + row + 1, c.get("BUSINESSNO"), format1));
+				sheet.addCell(new Label(14, i + row + 1, c.get("BIZTYPE"), format1));
+				sheet.addCell(new Label(15, i + row + 1, c.get("MERCHANTNAME"), format1));
+				sheet.addCell(new Label(16, i + row + 1, c.get("MEMO"), format1));
+			};
+
 		}
 
 		workbook.write();

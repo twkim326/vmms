@@ -956,6 +956,7 @@ public class VM {
 				c.put("IS_EXPIRE", !StringEx.isEmpty(rs.getString("TRAN_DATE")) && DateTime.getDifferTime(rs.getString("TRAN_DATE")) > 3600 * 24 ? "Y" : "N");
 				//20200421 cdh 에러내용 최종거래일 추가
 				c.put("FINAL_TRAN_DATE", rs.getString("FINAL_TRAN_DATE"));
+				c.put("MEMO", rs.getString("MEMO"));
 				this.data2.add(c);
 			} else {
 				error = "등록되지 않았거나 조회할 권한이 없는 자판기입니다.";
@@ -3498,6 +3499,8 @@ public class VM {
 					this.data.put("LATEST_PLACE_DATE", rs.getString("LATEST_PLACE_DATE"));
 					// 출입단말 상태 조회 컬럼 추가.(2020.12.23 by Chae)
 					this.data.put("ACCESS_STATUS", rs.getString("ACCESS_STATUS"));
+					// 메모 추가.(2021.11.11 by scheo)
+					this.data.put("MEMO", rs.getString("MEMO"));
 				} else {
 					error = "등록되지 않았거나 수정할 권한이 없는 자판기입니다.";
 				}
@@ -3705,7 +3708,8 @@ public class VM {
 	//public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove) throws Exception {
     //public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String place_code, String place_no, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove) throws Exception {
     //public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String place_code, String place_no, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove, int type) throws Exception {
-	public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String place_code, String place_no, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove, int type, String accessStatus) throws Exception {
+	//public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String place_code, String place_no, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove, int type, String accessStatus) throws Exception {
+	public String regist(HttpServletRequest request, long seq, long company, long organ, long user, String code, String terminal, String model, String place, String place_code, String place_no, String modem, int sgcnt, String reflectFlag, String aspCharge, String placeMove, int type, String accessStatus, String memo) throws Exception {
 
 		// 실행에 사용될 변수
 		DBLibrary dbLib = new DBLibrary(this.logger);
@@ -3744,8 +3748,8 @@ public class VM {
 			//cs = dbLib.prepareCall(conn, "{ CALL SP_VENDING_MACHINE3 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?) }");
 			//cs = dbLib.prepareCall(conn, "{ CALL SP_VENDING_MACHINE4 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?) }");
 			//cs = dbLib.prepareCall(conn, "{ CALL SP_VENDING_MACHINE5 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?) }");
-			// 신규 프로시저 생성 (2020.12.23 By Chae)
-			cs = dbLib.prepareCall(conn, "{ CALL SP_VENDING_MACHINE6 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?, ?) }");
+			// 신규 프로시저 생성 (2020.12.23 By Chae, 2021.11.11 By scheo)
+			cs = dbLib.prepareCall(conn, "{ CALL SP_VENDING_MACHINE6 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?, ?, ?) }");
 			cs.setString(1, this.cfg.get("server"));
 			cs.setLong(2, seq);
 			cs.setLong(3, company);
@@ -3767,6 +3771,7 @@ public class VM {
 			cs.registerOutParameter(17, OracleTypes.NUMBER);
 			cs.registerOutParameter(18, OracleTypes.VARCHAR);
 			cs.setString(19, accessStatus);
+			cs.setString(20, memo);
 			cs.execute();
 
 			sequence = cs.getLong(17);
@@ -5772,7 +5777,10 @@ public class VM {
 							/*20180622 허승찬 자판기관리 전자세금계산서 내역 종료*/
 							+ " C.NAME AS USER_NAME,"
 							+ " C.ID AS USER_ID,"
-							+ " TO_CHAR(D.CREATE_DATE, 'YYYYMMDDHH24MISS') AS TRAN_DATE"
+							+ " TO_CHAR(D.CREATE_DATE, 'YYYYMMDDHH24MISS') AS TRAN_DATE,"
+							+ " MST.BUSINESSNO AS BUSINESSNO , MST.BIZTYPE AS BIZTYPE, MST.MERCHANTNAME AS MERCHANTNAME, "	// 2021. 8. 17 사업자 정보 출력
+							/*20211115 허승찬 MEMO 추가*/
+							+ " A.MEMO"
 						+ " FROM TB_VENDING_MACHINE A"
 							+ " LEFT JOIN TB_COMPANY B"
 								+ " ON A.COMPANY_SEQ = B.SEQ"
@@ -5832,6 +5840,10 @@ public class VM {
 				c.put("EMPTY_COL_SELLING", 0);
 //				c.put("NO", no--);
 				c.put("USER_ID", rs.getString("USER_ID"));
+				c.put("BUSINESSNO", rs.getString("BUSINESSNO"));
+				c.put("BIZTYPE", rs.getString("BIZTYPE"));
+				c.put("MERCHANTNAME", rs.getString("MERCHANTNAME"));
+				c.put("MEMO", rs.getString("MEMO"));
 
 				this.list.add(c);
 			}
