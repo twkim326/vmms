@@ -228,7 +228,7 @@
 		if (elapseMon>2){
 			window.alert('3개월 단위로 조회가 가능합니다.');
 			return;
-		}
+		} 
 
 		$("sbmsg").show();
 

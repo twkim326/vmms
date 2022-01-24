@@ -6226,7 +6226,7 @@ public class Sales {
 				c.put("CNT_CARD", c.getLong("CNT_CARD") + count);
 				c.put("AMOUNT_CARD", c.getLong("AMOUNT_CARD") + amount);
 				c.put("PAY_CNT_CARD", c.getLong("PAY_CNT_CARD") + payCount);
-				c.put("COMMISSION_CARD", c.getLong("COMISSION_CARD") + commission);
+				c.put("COMMISSION_CARD", c.getLong("COMMISSION_CARD") + commission);
 				c.put("PAY_AMOUNT_CARD", c.getLong("PAY_AMOUNT_CARD") + payAmount);
 
 				//scheo 2018.10.11 추가
@@ -6251,7 +6251,7 @@ public class Sales {
 				c.put("CNT_PAYCO", c.getLong("CNT_PAYCO") + count);
 				c.put("AMOUNT_PAYCO", c.getLong("AMOUNT_PAYCO") + amount);
 				c.put("PAY_CNT_PAYCO", c.getLong("PAY_CNT_PAYCO") + payCount);
-				c.put("COMMISSION_PAYCO", c.getLong("COMISSION_PAYCO") + commission);
+				c.put("COMMISSION_PAYCO", c.getLong("COMMISSION_PAYCO") + commission);
 				c.put("PAY_AMOUNT_PAYCO", c.getLong("PAY_AMOUNT_PAYCO") + payAmount);
 				//scheo 2018.10.11 추가
 				

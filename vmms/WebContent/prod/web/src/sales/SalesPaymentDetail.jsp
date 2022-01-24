@@ -165,7 +165,7 @@
 			<td class="center" colspan="6" style="background-color:#e9e9e9;">총계</td>
 
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("PAY_CNT_CASH"))%></td>
-			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("COMMISION_CASH"))%></td>
+			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("COMMISSION_CASH"))%></td>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("PAY_AMOUNT_CASH"))%></td>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("PAY_CNT_CARD"))%></td>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(objSales.data.getLong("COMMISSION_CARD"))%></td>
@@ -222,14 +222,14 @@
 		%>
 		<tr>
 			<td class="center number" nowrap></td>
-		 	<td class="center" colspan="5" style="background-color:#e9e9e9;" nowrap>소계(<%=groupValues[1]%>)</td>
+		 	<td class="center" colspan="5" style="background-color:#e9e9e9;" nowrap>소계!(<%=groupValues[1]%>)</td>
 					<%	for (int j = 0; j < summaryColumns.length; j++) { %>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(summaryValues[1][j])%></td>
 					<%	} %>
 		</tr>
 				<%	} %>
 		<tr>
-		 	<td class="center" colspan="6" style="background-color:#e9e9e9;" nowrap>합계(<%=groupValues[0]%>)</td>
+		 	<td class="center" colspan="6" style="background-color:#e9e9e9;" nowrap>합계!(<%=groupValues[0]%>)</td>
 		 		<%	for (int j = 0; j < summaryColumns.length; j++) { %>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(summaryValues[0][j])%></td>
 					<%	
@@ -332,7 +332,7 @@
 			<td class="center number" nowrap>&nbsp;</td>
 		 	<td class="center" colspan="5" style="background-color:#e9e9e9;" nowrap>소계(<%=groupValues[1]%>)</td>
 			<%	} else { %>
-		 	<td class="center" colspan="6" style="background-color:#e9e9e9;" nowrap>소계(<%=groupValues[1]%>)</td>
+		 	<td class="center" colspan="6" style="background-color:#e9e9e9;" nowrap>소계!(<%=groupValues[1]%>)</td>
 		 	<%	} %>
 			<%	for (int j = 0; j < summaryColumns.length; j++) { %>
 			<td class="right number" style="background-color:#e9e9e9;" nowrap><%=StringEx.comma(summaryValues[1][j])%></td>
