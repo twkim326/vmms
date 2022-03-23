@@ -3232,7 +3232,7 @@ public class Sales {
 							+ " B.CODE AS ORGAN_CODE," //2017.12.21 jwhwang 추가
 							+ " C.PLACE AS PLACE,"
 							+ " D.CODE AS VM_CODE,"
-							+ " NVL(E.NAME, '미등록 상품[' || A.COL_NO || ']') AS PRODUCT, " //scheo 20181214 유광권부장요청 - 20190619 scheo 원복
+							+ " DECODE(SUBSTR(PRODUCT_CODE, 1, 1), '장', PRODUCT_CODE, NVL (E.NAME, '미등록 상품[' || A.COL_NO || ']')) AS PRODUCT, " //scheo 20181214 유광권부장요청 - 20190619 scheo 원복 / scheo 20220321 장바구니내역 추가
 							//+ " case when E.name is null then case when length(A.col_no) = '2' then '미등록 상품[' || '00' || A.col_no || ']' when length(A.col_no) = '1' then '미등록 상품[' || '000' || A.col_no || ']' when MOD(A.col_no,100) || TRUNC(A.col_no/100) <= '999' then '미등록 상품[' || '0' || MOD(A.col_no,100) || TRUNC(A.col_no/100) || ']' else '미등록 상품[' || MOD(A.col_no,100) || TRUNC(A.col_no/100) || ']' end else E.name end as PRODUCT ,"
 							+ " E.CODE AS PRODUCT_CODE "
 						+ " FROM ("
@@ -3259,7 +3259,40 @@ public class Sales {
 										+ " WHERE " + YYYYMMDD + " BETWEEN '"+ sDate + "' AND '" + eDate + "'"
 											+ " AND PAY_STEP NOT IN ('00', '99')"
 											+ WHERE
+											+ " AND A.ITEM_COUNT = 1 "
 										+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, TERMINAL_ID, PRODUCT_CODE, COL_NO"
+									
+									+ " UNION ALL"	// scheo 20220321 장바구니 내역 추가
+									+ " SELECT " 
+										+ " COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, TERMINAL_ID, '장바구니 ' || PRODUCT_CODE || '건' PRODUCT_CODE , COL_NO, " 
+										+ " SUM(CNT_CARD), SUM(AMOUNT_CARD), SUM(CNT_PAYCO), SUM(AMOUNT_PAYCO), SUM(CNT_ITEM), " 
+										+ " SUM(AMOUNT_ITEM), SUM(CNT_CASH), SUM(AMOUNT_CASH), SUM(CNT_PREPAY), SUM(AMOUNT_PREPAY) " 
+									+ " FROM ( "
+										+ " SELECT                              /*+ INDEX(A IX_SALES_TRANSACTION_DATE) */ "
+											+ " COMPANY_SEQ, "
+											+ " ORGANIZATION_SEQ, "
+											+ " VM_PLACE_SEQ, "
+											+ " TERMINAL_ID, "
+											+ " TO_CHAR(ITEM_COUNT) PRODUCT_CODE, "
+											+ " 0 COL_NO, "
+											+ " COUNT (CASE WHEN PAY_TYPE = '01' AND pay_step <> '06' THEN 1 END) "
+											+ " AS CNT_CARD, "
+											+ " NVL(SUM( CASE WHEN PAY_TYPE = '01' AND pay_step <> '06' THEN AMOUNT END), 0) AS AMOUNT_CARD, "
+											+ " COUNT (CASE WHEN PAY_TYPE = '07' THEN 1 END) AS CNT_PAYCO, "
+									        + " NVL (SUM (CASE WHEN PAY_TYPE = '07' THEN AMOUNT END), 0) AS AMOUNT_PAYCO, "
+									        + " COUNT (CASE WHEN PAY_TYPE = '80' THEN 1 END) AS CNT_ITEM, "
+									        + " NVL (SUM (CASE WHEN PAY_TYPE = '80' THEN AMOUNT END), 0) AS AMOUNT_ITEM, "
+									        + " COUNT (CASE WHEN PAY_TYPE IN ('02', '10') THEN 1 END) AS CNT_CASH, "
+									        + " NVL (SUM (CASE WHEN PAY_TYPE IN ('02', '10') THEN AMOUNT END), 0) AS AMOUNT_CASH, "
+									        + " COUNT (CASE WHEN PAY_TYPE = '11' THEN 1 END) AS CNT_PREPAY, "
+									        + " NVL (SUM (CASE WHEN PAY_TYPE = '11' THEN AMOUNT END), 0) AS AMOUNT_PREPAY "
+										+ " FROM TB_SALES A"
+										+ " WHERE " + YYYYMMDD + " BETWEEN '"+ sDate + "' AND '" + eDate + "'"
+											+ " AND PAY_STEP NOT IN ('00', '99')"
+											+ WHERE
+											+ " AND A.ITEM_COUNT > 1 "
+										+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, TERMINAL_ID, PRODUCT_CODE, COL_NO, ITEM_COUNT	) "
+									+ " GROUP BY   COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, TERMINAL_ID, PRODUCT_CODE , COL_NO "
 									+ " UNION ALL"
 									+ " SELECT"
 											+ " COMPANY_SEQ,"
@@ -3709,7 +3742,7 @@ public class Sales {
 				        			+ " SUM(AA.AMOUNT_CASH) AMOUNT_CASH, "
 				        			+ " SUM(AA.CNT_PREPAY) CNT_PREPAY, "
 				        			+ " SUM(AA.AMOUNT_PREPAY) AMOUNT_PREPAY, "
-				        			+ " NVL(E.NAME, '미등록 상품[' ||  AA.COL_NO || ']') AS PRODUCT " //scheo 20181214 유광권부장 요청 - 20190619 scheo 원복
+				        			+ " DECODE(SUBSTR(PRODUCT_CODE, 1, 1), '장', PRODUCT_CODE, NVL (E.NAME, '미등록 상품[' || AA.COL_NO || ']')) AS PRODUCT " //scheo 20181214 유광권부장 요청 - 20190619 scheo 원복 // scheo 20220322 장바구니 내역 추가
 				        			//+ " case when E.name is null then case when length(AA.col_no) = '2' then '미등록 상품[' || '00' || AA.col_no || ']' when length(AA.col_no) = '1' then '미등록 상품[' || '000' || AA.col_no || ']' when MOD(AA.col_no,100) || TRUNC(AA.col_no/100) <= '999' then '미등록 상품[' || '0' || MOD(AA.col_no,100) || TRUNC(AA.col_no/100) || ']' else '미등록 상품[' || MOD(AA.col_no,100) || TRUNC(AA.col_no/100) || ']' end else E.name end as PRODUCT"
 				        		+ " FROM (	"					
 				
@@ -3735,10 +3768,46 @@ public class Sales {
 										+ " FROM TB_SALES A"
 										+ " WHERE " + YYYYMMDD + " BETWEEN '"+ sDate + "' AND '" + eDate + "'"
 											+ " AND PAY_STEP NOT IN ('00', '99')"
+											+ " AND A.ITEM_COUNT = 1 "	 // scheo 20220322 장바구니 내역 추가
 											+ WHERE
 										//+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, GOODS_SEQ, COL_NO"
 										//+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, NVL(GOODS_SEQ, -COL_NO)"
 										+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, PRODUCT_CODE, COL_NO"
+									+ " UNION ALL"	// scheo 20220322 장바구니 내역 추가
+									+ " SELECT " 
+										+ " TYPE, COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, '장바구니 ' || PRODUCT_CODE || '건' PRODUCT_CODE, COL_NO, " 
+										+ " SUM(CNT_CARD), SUM(AMOUNT_CARD), SUM(CNT_PAYCO), SUM(AMOUNT_PAYCO), SUM(CNT_ITEM), " 
+										+ " SUM(AMOUNT_ITEM), SUM(CNT_CASH), SUM(AMOUNT_CASH), SUM(CNT_PREPAY), SUM(AMOUNT_PREPAY) " 
+									+ " FROM ( "
+										+ " SELECT /*+ INDEX(A IX_SALES_" + YYYYMMDD + ") */"
+											+ " 'A' TYPE, COMPANY_SEQ,"
+											+ " ORGANIZATION_SEQ,"
+											+ " VM_PLACE_SEQ,"
+											+ " TO_CHAR(ITEM_COUNT) PRODUCT_CODE, "
+											//+ " NVL(GOODS_SEQ, -COL_NO) AS GOODS_SEQ,"
+											+ " 0 COL_NO,"
+											+ " COUNT(CASE WHEN PAY_TYPE = '01' and pay_step <> '06' THEN 1 END) AS CNT_CARD,"
+											+ " NVL(SUM(CASE WHEN PAY_TYPE = '01' and pay_step <> '06' THEN AMOUNT END), 0) AS AMOUNT_CARD,"
+											//scheo 2018.10.10 추가
+											+ " COUNT(CASE WHEN PAY_TYPE = '07' THEN 1 END) AS CNT_PAYCO,"
+											+ " NVL(SUM(CASE WHEN PAY_TYPE = '07' THEN AMOUNT END), 0) AS AMOUNT_PAYCO,"
+											//scheo 2021.09.07 추가
+											+ " COUNT(CASE WHEN PAY_TYPE = '80' THEN 1 END) AS CNT_ITEM,"
+											+ " NVL(SUM(CASE WHEN PAY_TYPE = '80' THEN AMOUNT END), 0) AS AMOUNT_ITEM,"
+											+ " COUNT(CASE WHEN PAY_TYPE IN ('02', '10') THEN 1 END) AS CNT_CASH,"
+											+ " NVL(SUM(CASE WHEN PAY_TYPE IN ('02', '10') THEN AMOUNT END), 0) AS AMOUNT_CASH,"
+											+ " COUNT(CASE WHEN PAY_TYPE = '11' THEN 1 END) AS CNT_PREPAY,"
+											+ " NVL(SUM(CASE WHEN PAY_TYPE = '11' THEN AMOUNT END), 0) AS AMOUNT_PREPAY"
+										+ " FROM TB_SALES A"
+										+ " WHERE " + YYYYMMDD + " BETWEEN '"+ sDate + "' AND '" + eDate + "'"
+											+ " AND PAY_STEP NOT IN ('00', '99')"
+											+ " AND A.ITEM_COUNT > 1 "
+											+ WHERE
+										//+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, GOODS_SEQ, COL_NO"
+										//+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, NVL(GOODS_SEQ, -COL_NO)"
+										+ " GROUP BY COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, ITEM_COUNT, COL_NO )"
+									+ " GROUP BY TYPE, COMPANY_SEQ, ORGANIZATION_SEQ, VM_PLACE_SEQ, PRODUCT_CODE, COL_NO"
+										
 									+ " UNION ALL"
 									+ " SELECT"
 											+ " 'C' TYPE, COMPANY_SEQ,"
@@ -7715,8 +7784,10 @@ public class Sales {
 				            + " SUM(TOTAL_AMOUNT) - SUM(VMMS_CARD_AMOUNT) AMOUNT_CASH," 
 				            + " SUM(VMMS_CRDT_COUNT) CNT_CARD," 
 				            + " SUM(VMMS_CRDT_AMOUNT) AMOUNT_CARD," 
-				            + " SUM(VMMS_NPC_COUNT) CNT_SMTPAY," //scheo 
-				            + " SUM(VMMS_NPC_AMOUNT) AMOUNT_SMTPAY," 
+					        //+ " SUM(VMMS_NPC_COUNT) CNT_SMTPAY," //scheo 
+	                        //+ " SUM(VMMS_NPC_AMOUNT) AMOUNT_SMTPAY,"
+	                        + " SUM(VMMS_NPC_COUNT) + SUM(VMMS_KKO_COUNT) CNT_SMTPAY,"         //카카오페이 추가
+	                        + " SUM(VMMS_NPC_AMOUNT) + SUM(VMMS_KKO_AMOUNT) AMOUNT_SMTPAY," //카카오페이 추가
 				            + SUM_OF_EACH_PREPAY_COMPANY
 				            + " MAX(MEMO) " 
 				        + " FROM TB_SALESCOUNT_DETAIL "
@@ -9486,8 +9557,10 @@ public class Sales {
 				            + " SUM(TOTAL_AMOUNT) - SUM(VMMS_CARD_AMOUNT) AMOUNT_CASH," 
 				            + " SUM(VMMS_CRDT_COUNT) CNT_CARD," 
 				            + " SUM(VMMS_CRDT_AMOUNT) AMOUNT_CARD," 
-				            + " SUM(VMMS_NPC_COUNT) CNT_SMTPAY," 
-				            + " SUM(VMMS_NPC_AMOUNT) AMOUNT_SMTPAY," 
+					        //+ " SUM(VMMS_NPC_COUNT) CNT_SMTPAY," 
+	                        //+ " SUM(VMMS_NPC_AMOUNT) AMOUNT_SMTPAY,"
+	                        + " SUM(VMMS_NPC_COUNT) + SUM(VMMS_KKO_COUNT) CNT_SMTPAY,"             // 카카오페이 추가
+	                        + " SUM(VMMS_NPC_AMOUNT) + SUM(VMMS_KKO_AMOUNT) AMOUNT_SMTPAY,"     // 카카오페이 추가
 							+ SUM_OF_EACH_PREPAY_COMPANY
 							+ " MAX(MEMO) "
 				        + " FROM TB_SALESCOUNT_DETAIL" 
